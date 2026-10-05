@@ -12,6 +12,7 @@ from minutes.answer.pipeline import answer
 from minutes.api.app import create_app
 from minutes.api.schemas import Chunker, Pipeline, SearchMode
 from minutes.config import Corpus, corpus_database_url, get_settings
+from minutes.corpus import assert_minimums, corpus_stats
 from minutes.errors import ConfigError, GateStaleError, LabelRuleError, LLMQuotaError, MinutesError
 from minutes.ingest import pipeline, quality
 from minutes.log import bind_correlation_id, configure_logging, get_logger, new_correlation_id
@@ -252,6 +253,26 @@ def corpus_make_dev_subset(seed: Annotated[int, typer.Option("--seed")] = 7) -> 
     with db.connect(get_settings().database_url) as conn:
         documents = corpus.make_dev_subset(conn, seed)
     typer.echo(f"wrote {len(documents)} documents")
+
+
+@corpus_app.command("stats")
+def corpus_stats_command(
+    check_minimums: Annotated[bool, typer.Option("--assert-minimums")] = False,
+    corpus: CorpusOption = None,
+) -> None:
+    """Print document and unit counts for each city and optionally check minimums."""
+    with db.connect(corpus_database_url(use_corpus(corpus))) as conn:
+        stats = corpus_stats(conn)
+    for city_id in sorted(stats.per_city):
+        city = stats.per_city[city_id]
+        typer.echo(
+            f"{city_id} documents={city.documents} agenda={city.agenda} minutes={city.minutes} "
+            f"transcript={city.transcript} pages={city.pages} segments={city.segments} "
+            f"ocr_pages={city.ocr_pages} bytes={city.bytes}"
+        )
+    typer.echo(f"total pages={stats.total_pages}")
+    if check_minimums:
+        assert_minimums(stats)
 
 
 @corpus_app.command("parse-quality")
