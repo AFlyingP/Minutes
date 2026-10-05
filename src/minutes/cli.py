@@ -1,10 +1,12 @@
-from typing import Any
+import os
+from typing import Annotated, Any
+from urllib.parse import urlsplit
 
 import typer
 from typer.core import TyperGroup
 
-from minutes import probe
-from minutes.config import get_settings
+from minutes import db, probe
+from minutes.config import Corpus, corpus_database_url, get_settings
 from minutes.errors import ConfigError, GateStaleError, LabelRuleError, LLMQuotaError, MinutesError
 from minutes.log import bind_correlation_id, configure_logging, new_correlation_id
 
@@ -27,7 +29,9 @@ class ErrorGroup(TyperGroup):
 
 app = typer.Typer(no_args_is_help=True, cls=ErrorGroup)
 probe_app = typer.Typer(no_args_is_help=True)
+db_app = typer.Typer(no_args_is_help=True)
 app.add_typer(probe_app, name="probe")
+app.add_typer(db_app, name="db")
 
 
 @app.callback()
@@ -63,3 +67,51 @@ def probe_sources() -> None:
 def probe_gpu() -> None:
     """Check that the embedder, reranker, and OCR models load on the GPU."""
     report(probe.probe_gpu())
+
+
+def use_corpus(corpus: str | None) -> Corpus:
+    """Apply a --corpus option to this process and return the corpus in effect."""
+    if corpus is not None:
+        os.environ["MINUTES_CORPUS"] = corpus
+        get_settings.cache_clear()
+    return get_settings().corpus
+
+
+CorpusOption = Annotated[str | None, typer.Option("--corpus", help="fixture, dev, or full")]
+
+
+@db_app.command("migrate")
+def db_migrate(corpus: CorpusOption = None) -> None:
+    """Apply the migrations that have not run yet."""
+    applied = db.migrate(corpus_database_url(use_corpus(corpus)))
+    for version in applied:
+        typer.echo(f"applied {version}")
+    if not applied:
+        typer.echo("up to date")
+
+
+@db_app.command("rollback")
+def db_rollback(
+    steps: Annotated[int, typer.Option(min=1)] = 1, corpus: CorpusOption = None
+) -> None:
+    """Undo the latest migrations."""
+    for version in db.rollback(corpus_database_url(use_corpus(corpus)), steps):
+        typer.echo(f"rolled back {version}")
+
+
+@db_app.command("reset")
+def db_reset(
+    yes: Annotated[bool, typer.Option("--yes")] = False,
+    everything: Annotated[bool, typer.Option("--all")] = False,
+) -> None:
+    """Drop, recreate, and migrate the test database; with --all the corpus database too."""
+    if not yes:
+        typer.echo("refusing without --yes")
+        raise typer.Exit(2)
+    settings = get_settings()
+    urls = [settings.test_database_url]
+    if everything:
+        urls.insert(0, settings.database_url)
+    for url in urls:
+        db.reset(url)
+        typer.echo(f"reset {urlsplit(url).path.lstrip('/')}")
