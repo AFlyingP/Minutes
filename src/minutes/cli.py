@@ -1,15 +1,21 @@
 import os
+from datetime import datetime
 from typing import Annotated, Any
 from urllib.parse import urlsplit
 
 import typer
+import uvicorn
 from typer.core import TyperGroup
 
 from minutes import db, probe
+from minutes.answer.pipeline import answer
+from minutes.api.app import create_app
+from minutes.api.schemas import Chunker, Pipeline, SearchMode
 from minutes.config import Corpus, corpus_database_url, get_settings
 from minutes.errors import ConfigError, GateStaleError, LabelRuleError, LLMQuotaError, MinutesError
 from minutes.ingest import pipeline
-from minutes.log import bind_correlation_id, configure_logging, new_correlation_id
+from minutes.log import bind_correlation_id, configure_logging, get_logger, new_correlation_id
+from minutes.retrieval.search import Filters, city_names, hit_heading, search, span_label
 
 EXIT_CODES: dict[type[MinutesError], int] = {
     ConfigError: 2,
@@ -140,3 +146,93 @@ def fixtures_load() -> None:
     get_settings.cache_clear()
     count = pipeline.load_fixture_corpus(get_settings().test_database_url)
     typer.echo(f"loaded {count} documents")
+
+
+CityOption = Annotated[str | None, typer.Option()]
+BodyOption = Annotated[str | None, typer.Option()]
+DateOption = Annotated[datetime | None, typer.Option(formats=["%Y-%m-%d"])]
+KindOption = Annotated[str | None, typer.Option()]
+
+
+def as_filters(
+    city: str | None,
+    body: str | None,
+    date_from: datetime | None,
+    date_to: datetime | None,
+    kind: str | None,
+) -> Filters:
+    return Filters(
+        city=city,
+        date_from=date_from.date() if date_from else None,
+        date_to=date_to.date() if date_to else None,
+        body=body,
+        kind=kind,
+    )
+
+
+@app.command("search")
+def search_command(
+    query: str,
+    city: CityOption = None,
+    body: BodyOption = None,
+    date_from: DateOption = None,
+    date_to: DateOption = None,
+    kind: KindOption = None,
+    mode: Annotated[SearchMode, typer.Option()] = "hybrid_rerank",
+    chunker: Annotated[Chunker, typer.Option()] = "item",
+    k: Annotated[int, typer.Option()] = 10,
+    corpus: CorpusOption = None,
+) -> None:
+    """Search the indexed records and print one line per hit."""
+    filters = as_filters(city, body, date_from, date_to, kind)
+    with db.connect(corpus_database_url(use_corpus(corpus))) as conn:
+        hits = search(conn, query, filters, mode=mode, chunker=chunker, k=k)
+        names = city_names(conn)
+    for hit in hits:
+        span = hit.spans[0]
+        label = span_label(span.unit_kind, span.unit_index, hit.start_ms)
+        heading = hit_heading(names[hit.city_id], hit)
+        typer.echo(f"{hit.rank} {hit.score:.3f} {hit.document_id} {label} {heading}")
+
+
+@app.command("ask")
+def ask_command(
+    question: str,
+    city: CityOption = None,
+    body: BodyOption = None,
+    date_from: DateOption = None,
+    date_to: DateOption = None,
+    kind: KindOption = None,
+    pipeline_name: Annotated[Pipeline, typer.Option("--pipeline")] = "final",
+    no_controls: Annotated[bool, typer.Option("--no-controls")] = False,
+    corpus: CorpusOption = None,
+) -> None:
+    """Answer a question from the indexed records, with citations."""
+    filters = as_filters(city, body, date_from, date_to, kind)
+    with db.connect(corpus_database_url(use_corpus(corpus))) as conn:
+        result = answer(
+            conn,
+            question,
+            filters,
+            pipeline=pipeline_name,
+            controls=not no_controls,
+        )
+    if result.declined:
+        typer.echo(f"declined: {result.decline_reason}")
+        return
+    for sentence in result.sentences:
+        typer.echo(sentence.text + " " + "".join(f"[{n}]" for n in sentence.citations))
+    for citation in result.citations:
+        label = span_label(citation.unit_kind, citation.unit_index, citation.start_ms)
+        typer.echo(f"[{citation.number}] {citation.document_id} {label}")
+
+
+@app.command("serve")
+def serve(port: Annotated[int | None, typer.Option()] = None, corpus: CorpusOption = None) -> None:
+    """Run the HTTP API on 127.0.0.1."""
+    use_corpus(corpus)
+    port = port or get_settings().api_port
+    get_logger("api").info(
+        f"api listening on http://127.0.0.1:{port}", extra={"event": "api_start"}
+    )
+    uvicorn.run(create_app(), host="127.0.0.1", port=port, log_level="warning")
