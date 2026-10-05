@@ -98,20 +98,20 @@ def test_vector_extension_and_hnsw_index_exist(conn: psycopg.Connection[TupleRow
 
 
 def test_units_check_rejects_segment_without_times(conn: psycopg.Connection[TupleRow]) -> None:
-    conn.execute("INSERT INTO cities VALUES ('birch', 'Birch', 'CA', 'granicus')")
+    conn.execute("INSERT INTO cities VALUES ('cedar', 'Cedar', 'CA', 'granicus')")
     conn.execute(
         "INSERT INTO meetings (id, city_id, body, meeting_date, title, source_key) "
-        "VALUES ('birch-201', 'birch', 'City Council', '2024-03-12', 'City Council', '201')"
+        "VALUES ('cedar-301', 'cedar', 'City Council', '2024-03-12', 'City Council', '301')"
     )
     conn.execute(
         "INSERT INTO documents (id, meeting_id, city_id, kind, source_url, media_type, unit_kind) "
-        "VALUES ('birch-transcript-201', 'birch-201', 'birch', 'transcript', "
-        "'file:birch-transcript-201.vtt', 'text/vtt', 'segment')"
+        "VALUES ('cedar-transcript-301', 'cedar-301', 'cedar', 'transcript', "
+        "'file:cedar-transcript-301.vtt', 'text/vtt', 'segment')"
     )
     with pytest.raises(psycopg.errors.CheckViolation):
         conn.execute(
             "INSERT INTO units (document_id, unit_index, unit_kind, text, text_source, end_ms) "
-            "VALUES ('birch-transcript-201', 1, 'segment', 'good evening', 'caption', 4000)"
+            "VALUES ('cedar-transcript-301', 1, 'segment', 'good evening', 'caption', 4000)"
         )
 
 
