@@ -9,6 +9,7 @@ from typer.testing import CliRunner
 from minutes import config, probe
 from minutes.cli import app
 from minutes.config import get_settings
+from minutes.sources import base as source_base
 
 KEY = "sk-test-0123456789"
 SRT = "".join(
@@ -51,7 +52,7 @@ def clean_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Iterator[None]
         if key.startswith("MINUTES_"):
             monkeypatch.delenv(key)
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr(probe, "REQUEST_GAP", 0)
+    monkeypatch.setattr(source_base.HOST_THROTTLE, "wait", lambda url: None)
     get_settings.cache_clear()
     yield
     get_settings.cache_clear()

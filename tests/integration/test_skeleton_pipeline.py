@@ -8,12 +8,11 @@ from psycopg.rows import TupleRow
 from typer.testing import CliRunner
 
 from minutes.cli import app
-from minutes.config import get_settings, load_cities
+from minutes.config import get_settings
 from minutes.errors import ConfigError, NotFoundError
 from minutes.ingest import pipeline
 from minutes.ingest.parse import render_page_png
 from minutes.models import get_embedder, get_ocr, get_reranker
-from minutes.sources import get_source
 
 pytestmark = pytest.mark.integration
 
@@ -91,11 +90,7 @@ def test_unknown_document_is_not_found(fixture_corpus: str, conn: Connection) ->
         pipeline.run_stage(conn, "parse", "alder-minutes-999", "fixture")
 
 
-def test_real_sources_and_gpu_models_are_not_available_yet(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    with pytest.raises(ConfigError, match="source legistar is not available"):
-        get_source("seattle", load_cities("full")["seattle"])
+def test_gpu_models_are_not_available_yet(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("MINUTES_MODELS_MODE", "gpu")
     get_settings.cache_clear()
     try:
