@@ -58,7 +58,12 @@ def get_reranker() -> Reranker:
 
 
 def get_ocr() -> OcrEngine:
+    from minutes.ingest.ocr import DoctrEngine
     from minutes.models.stubs import StubOcr
 
-    _require_stub()
-    return StubOcr()
+    mode = get_settings().models_mode
+    if mode == "stub":
+        return StubOcr()
+    if mode == "gpu":
+        return DoctrEngine()
+    raise ConfigError(f"models mode {mode} is not available")

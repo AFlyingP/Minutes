@@ -13,13 +13,13 @@ from minutes import db
 from minutes.config import CONFIG_DIR, Corpus, get_settings, load_cities
 from minutes.errors import NotFoundError, StageError
 from minutes.extract import extractor
-from minutes.ingest import chunk, download, embed, parse, segment
+from minutes.ingest import chunk, download, embed, ocr, parse, segment
 from minutes.sources import get_source
 
 Connection = psycopg.Connection[TupleRow]
 
 STAGES: tuple[str, ...] = ("download", "parse", "ocr", "segment", "chunk", "embed", "extract")
-STAGE_VERSIONS: dict[str, int] = {stage: 1 for stage in STAGES} | {"parse": 2}
+STAGE_VERSIONS: dict[str, int] = {stage: 1 for stage in STAGES} | {"parse": 3}
 LABEL_GATED_STAGES = ("segment", "chunk", "embed", "extract")
 
 
@@ -45,14 +45,10 @@ def should_run(conn: Connection, document_id: str, stage: str, input_hash: str) 
     return row is None
 
 
-def _ocr(conn: Connection, document_id: str) -> dict[str, object]:
-    return {"ocr_pages": 0}
-
-
 STAGE_FUNCTIONS: dict[str, Callable[[Connection, str], dict[str, object]]] = {
     "download": download.run,
     "parse": parse.run,
-    "ocr": _ocr,
+    "ocr": ocr.run,
     "segment": segment.run,
     "chunk": chunk.run,
     "embed": embed.run,

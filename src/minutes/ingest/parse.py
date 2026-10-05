@@ -9,6 +9,7 @@ from psycopg.rows import TupleRow
 from psycopg.types.json import Jsonb
 
 from minutes.errors import NotFoundError, PermanentStageError
+from minutes.ingest import ocr
 from minutes.ingest.layout import Table, Word, build_text
 
 
@@ -33,6 +34,7 @@ def run(conn: psycopg.Connection[TupleRow], document_id: str) -> dict[str, objec
         pdf = pdfplumber.open(file_path)
     except PdfminerException as err:
         raise PermanentStageError("unreadable pdf") from err
+    ocr_count = 0
     with pdf:
         for index, page in enumerate(pdf.pages, start=1):
             words = [
@@ -47,15 +49,17 @@ def run(conn: psycopg.Connection[TupleRow], document_id: str) -> dict[str, objec
                 if len(rows := table.rows) >= 2 and len(table.columns) >= 2
             ]
             text, boxes = build_text(words, tables, page.width, page.height)
+            needs_ocr = ocr.needs_ocr(text, image_area_ratio(page))
+            ocr_count += needs_ocr
             conn.execute(
                 "INSERT INTO units (document_id, unit_index, unit_kind, text, boxes, text_source, "
                 "width_pt, height_pt, needs_ocr) "
-                "VALUES (%s, %s, 'page', %s, %s, 'pdf', %s, %s, false)",
-                (document_id, index, text, Jsonb(boxes), page.width, page.height),
+                "VALUES (%s, %s, 'page', %s, %s, 'pdf', %s, %s, %s)",
+                (document_id, index, text, Jsonb(boxes), page.width, page.height, needs_ocr),
             )
         count = len(pdf.pages)
     conn.execute("UPDATE documents SET unit_count = %s WHERE id = %s", (count, document_id))
-    return {"units": count, "needs_ocr": 0}
+    return {"units": count, "needs_ocr": ocr_count}
 
 
 def render_page_png(file_path: str, page_index: int, dpi: int) -> bytes:
