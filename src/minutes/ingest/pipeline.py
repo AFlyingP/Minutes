@@ -14,6 +14,7 @@ from minutes.config import CONFIG_DIR, Corpus, get_settings, load_cities
 from minutes.errors import NotFoundError, StageError
 from minutes.extract import extractor
 from minutes.ingest import chunk, download, embed, ocr, parse, segment
+from minutes.labels import store
 from minutes.sources import get_source
 
 Connection = psycopg.Connection[TupleRow]
@@ -60,6 +61,8 @@ def run_stage(
     conn: Connection, stage: str, document_id: str, corpus: str, *, attempt: int = 1
 ) -> StageResult:
     """Run one stage for one document unless it already ran on the same input."""
+    if stage in LABEL_GATED_STAGES and corpus != "fixture":
+        store.require_frozen()
     row = conn.execute(
         "SELECT source_url, content_sha256 FROM documents WHERE id = %s", (document_id,)
     ).fetchone()
