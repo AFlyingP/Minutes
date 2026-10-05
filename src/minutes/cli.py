@@ -1,13 +1,13 @@
 import os
 from datetime import datetime
-from typing import Annotated, Any
+from typing import Annotated, Any, NoReturn
 from urllib.parse import urlsplit
 
 import typer
 import uvicorn
 from typer.core import TyperGroup
 
-from minutes import db, probe
+from minutes import db, probe, queue, worker
 from minutes.answer.pipeline import answer
 from minutes.api.app import create_app
 from minutes.api.schemas import Chunker, Pipeline, SearchMode
@@ -40,8 +40,12 @@ db_app = typer.Typer(no_args_is_help=True)
 app.add_typer(probe_app, name="probe")
 app.add_typer(db_app, name="db")
 ingest_app = typer.Typer(no_args_is_help=True)
+worker_app = typer.Typer(no_args_is_help=True)
+jobs_app = typer.Typer(no_args_is_help=True)
 fixtures_app = typer.Typer(no_args_is_help=True)
 app.add_typer(ingest_app, name="ingest")
+app.add_typer(worker_app, name="worker")
+app.add_typer(jobs_app, name="jobs")
 app.add_typer(fixtures_app, name="fixtures")
 
 
@@ -137,6 +141,92 @@ def ingest_discover(
     with db.connect(corpus_database_url(used)) as conn:
         added = pipeline.discover(conn, used, city)
     typer.echo(f"discovered {added} new documents")
+
+
+def summary_line(summary: worker.WorkerSummary) -> str:
+    return (
+        f"done {summary.done} skipped {summary.skipped} failed {summary.failed} dead {summary.dead}"
+    )
+
+
+def quota_pause() -> NoReturn:
+    typer.echo("paused: quota exhausted, rerun the same command to resume")
+    raise typer.Exit(75)
+
+
+@ingest_app.command("run")
+def ingest_run(
+    stages: Annotated[str, typer.Option()],
+    city: Annotated[str | None, typer.Option()] = None,
+    corpus: CorpusOption = None,
+) -> None:
+    """Run the selected ingestion stages through the job queue."""
+    names = tuple(stages.split(","))
+    if (
+        len(set(names)) != len(names)
+        or any(name not in pipeline.STAGES for name in names)
+        or tuple(sorted(names, key=pipeline.STAGES.index)) != names
+    ):
+        raise ConfigError(
+            "stages must be a subset of download,parse,ocr,segment,chunk,embed,extract "
+            "in that order"
+        )
+    used = use_corpus(corpus)
+    totals = [0, 0, 0, 0]
+    for stage in names:
+        with db.connect(corpus_database_url(used)) as conn:
+            for document_id in pipeline.documents_for(conn, used, city):
+                queue.enqueue(conn, stage, document_id, used)
+        try:
+            result = worker.run(used, drain=True, stage=stage)
+        except LLMQuotaError:
+            quota_pause()
+        typer.echo(f"{stage}: {summary_line(result)}")
+        totals[0] += result.done
+        totals[1] += result.skipped
+        totals[2] += result.failed
+        totals[3] += result.dead
+    typer.echo(f"done {totals[0]} skipped {totals[1]} failed {totals[2]} dead {totals[3]}")
+    if totals[3]:
+        raise typer.Exit(1)
+
+
+@worker_app.command("run")
+def worker_run(
+    drain: Annotated[bool, typer.Option("--drain/--no-drain")] = False,
+    corpus: CorpusOption = None,
+) -> None:
+    """Run queued stage jobs until the queue drains or the process is stopped."""
+    try:
+        result = worker.run(use_corpus(corpus), drain=drain)
+    except LLMQuotaError:
+        quota_pause()
+    typer.echo(summary_line(result))
+    if result.dead:
+        raise typer.Exit(1)
+
+
+@jobs_app.command("list")
+def jobs_list(
+    status: Annotated[str | None, typer.Option()] = None, corpus: CorpusOption = None
+) -> None:
+    """Print the newest queued and completed jobs."""
+    with db.connect(corpus_database_url(use_corpus(corpus))) as conn:
+        rows = conn.execute(
+            "SELECT id, stage, document_id, status, attempts, last_error FROM jobs "
+            "WHERE (%s::text IS NULL OR status = %s) ORDER BY id DESC LIMIT 200",
+            (status, status),
+        ).fetchall()
+    for job_id, stage, document_id, job_status, attempts, last_error in rows:
+        typer.echo(f"{job_id} {stage} {document_id} {job_status} {attempts} {last_error or ''}")
+
+
+@jobs_app.command("retry-dead")
+def jobs_retry_dead(corpus: CorpusOption = None) -> None:
+    """Return every dead job to the queue."""
+    with db.connect(corpus_database_url(use_corpus(corpus))) as conn:
+        count = queue.retry_dead(conn)
+    typer.echo(f"requeued {count}")
 
 
 @fixtures_app.command("load")

@@ -11,7 +11,7 @@ from psycopg.types.json import Jsonb
 
 from minutes import db
 from minutes.config import CONFIG_DIR, Corpus, get_settings, load_cities
-from minutes.errors import NotFoundError
+from minutes.errors import NotFoundError, StageError
 from minutes.extract import extractor
 from minutes.ingest import chunk, embed, parse, segment
 from minutes.sources import get_source
@@ -97,7 +97,9 @@ STAGE_FUNCTIONS: dict[str, Callable[[Connection, str], dict[str, object]]] = {
 }
 
 
-def run_stage(conn: Connection, stage: str, document_id: str, corpus: str) -> StageResult:
+def run_stage(
+    conn: Connection, stage: str, document_id: str, corpus: str, *, attempt: int = 1
+) -> StageResult:
     """Run one stage for one document unless it already ran on the same input."""
     row = conn.execute(
         "SELECT source_url, content_sha256 FROM documents WHERE id = %s", (document_id,)
@@ -113,6 +115,11 @@ def run_stage(conn: Connection, stage: str, document_id: str, corpus: str) -> St
     input_hash = stage_input_hash(content_sha256, stage)
     if not should_run(conn, document_id, stage, input_hash):
         return StageResult("skipped")
+    fault = get_settings().fault
+    if fault.startswith("stage:"):
+        _, fault_stage, fault_document, count = fault.split(":")
+        if stage == fault_stage and document_id == fault_document and attempt <= int(count):
+            raise StageError("injected fault")
     detail = STAGE_FUNCTIONS[stage](conn, document_id)
     conn.execute(
         "INSERT INTO stage_runs (document_id, stage, input_sha256, status, detail) "

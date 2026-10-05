@@ -5,7 +5,8 @@ import math
 import re
 from typing import Any
 
-from minutes.errors import ConfigError
+from minutes.config import get_settings
+from minutes.errors import ConfigError, LLMQuotaError
 from minutes.llm import Budget, ChatResult
 
 VOTE_LABELS = ("In Favor:", "Opposed:", "Ayes:", "Noes:", "Nays:", "Abstain:", "Absent:")
@@ -44,6 +45,8 @@ MOTION = re.compile(
     r"(?:Councilmember|Commissioner) (\w+) motioned to (\w+), motion was seconded by"
     r"\s+(?:Councilmember|Commissioner)\s+(\w+)"
 )
+_quota_fault = ""
+_quota_calls = 0
 
 
 def _labelled(text: str) -> list[tuple[str, str]]:
@@ -175,6 +178,16 @@ class StubClient:
         sample_index: int = 0,
         budget: Budget | None = None,
     ) -> ChatResult:
+        global _quota_fault, _quota_calls
+        fault = get_settings().fault
+        if fault != _quota_fault:
+            _quota_fault = fault
+            _quota_calls = 0
+        if fault.startswith("llm_quota:"):
+            quota_count = int(fault.split(":")[1])
+            if _quota_calls < quota_count:
+                _quota_calls += 1
+                raise LLMQuotaError("injected quota fault")
         user = messages[-1]["content"]
         if purpose == "synth":
             parsed = _synth(user)
