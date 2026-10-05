@@ -8,6 +8,7 @@ from psycopg.rows import TupleRow
 
 from minutes import db
 from minutes.config import get_settings
+from minutes.ingest import pipeline
 
 STUB_ENV = {
     "MINUTES_LLM_MODE": "stub",
@@ -53,3 +54,9 @@ def conn(test_db_url: str) -> Iterator[psycopg.Connection[TupleRow]]:
     with db.get_pool(test_db_url).connection() as connection:
         yield connection
         connection.rollback()
+
+
+@pytest.fixture(scope="session")
+def fixture_corpus(test_db_url: str) -> str:
+    pipeline.load_fixture_corpus(test_db_url)
+    return test_db_url

@@ -7,6 +7,7 @@ from typer.testing import CliRunner
 
 from minutes import db
 from minutes.cli import app
+from minutes.config import get_settings
 from minutes.errors import DatabaseError, MigrationError
 
 pytestmark = pytest.mark.integration
@@ -41,6 +42,14 @@ VIEWS = {
 }
 
 
+@pytest.fixture(scope="module")
+def scratch_url(test_db_url: str) -> str:
+    # these tests drop and rebuild the schema, so they get a database of their own
+    url = test_db_url.replace("/minutes_test", "/minutes_migrations_test")
+    db.reset(url)
+    return url
+
+
 def test_migrate_creates_all_tables_and_views(conn: psycopg.Connection[TupleRow]) -> None:
     tables = conn.execute(
         "SELECT table_name FROM information_schema.tables "
@@ -53,16 +62,16 @@ def test_migrate_creates_all_tables_and_views(conn: psycopg.Connection[TupleRow]
     assert {row[0] for row in views} == VIEWS
 
 
-def test_migrate_is_idempotent(test_db_url: str) -> None:
-    assert db.migrate(test_db_url) == []
+def test_migrate_is_idempotent(scratch_url: str) -> None:
+    assert db.migrate(scratch_url) == []
 
 
-def test_rollback_then_migrate_restores_schema(test_db_url: str) -> None:
-    assert db.rollback(test_db_url, steps=1) == ["0001"]
-    with db.connect(test_db_url) as conn:
+def test_rollback_then_migrate_restores_schema(scratch_url: str) -> None:
+    assert db.rollback(scratch_url, steps=1) == ["0001"]
+    with db.connect(scratch_url) as conn:
         units = conn.execute("SELECT to_regclass('public.units')").fetchone()
     assert units == (None,)
-    assert db.migrate(test_db_url) == ["0001"]
+    assert db.migrate(scratch_url) == ["0001"]
 
 
 def test_vector_extension_and_hnsw_index_exist(conn: psycopg.Connection[TupleRow]) -> None:
@@ -99,7 +108,7 @@ def test_reset_refuses_non_local_host() -> None:
 
 
 def test_failed_migration_rolls_back_only_that_file(
-    test_db_url: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    scratch_url: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     (tmp_path / "0001_first.sql").write_text("CREATE TABLE first (id integer);")
     (tmp_path / "0002_second.sql").write_text("CREATE TABLE second (id nosuchtype);")
@@ -107,26 +116,31 @@ def test_failed_migration_rolls_back_only_that_file(
         with monkeypatch.context() as patch:
             patch.setattr(db, "MIGRATIONS_DIR", tmp_path)
             with pytest.raises(MigrationError, match="0002"):
-                db.reset(test_db_url)
-        with psycopg.connect(test_db_url) as conn:
+                db.reset(scratch_url)
+        with psycopg.connect(scratch_url) as conn:
             versions = conn.execute("SELECT version FROM schema_migrations").fetchall()
             second = conn.execute("SELECT to_regclass('public.second')").fetchone()
         assert versions == [("0001",)]
         assert second == (None,)
     finally:
-        # later tests share this database and need the real schema back
-        db.reset(test_db_url)
+        # the tests below need the real schema back
+        db.reset(scratch_url)
 
 
-def test_db_commands_print_what_they_did(test_db_url: str) -> None:
+def test_db_commands_print_what_they_did(scratch_url: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("MINUTES_TEST_DATABASE_URL", scratch_url)
+    get_settings.cache_clear()
     runner = CliRunner()
     assert runner.invoke(app, ["db", "migrate"]).output == "up to date\n"
     assert runner.invoke(app, ["db", "rollback"]).output == "rolled back 0001\n"
     assert runner.invoke(app, ["db", "migrate"]).output == "applied 0001\n"
-    assert runner.invoke(app, ["db", "reset", "--yes"]).output == "reset minutes_test\n"
+    reset = runner.invoke(app, ["db", "reset", "--yes"])
+    monkeypatch.undo()
+    get_settings.cache_clear()
+    assert reset.output == "reset minutes_migrations_test\n"
 
 
-def test_db_reset_refuses_without_yes(test_db_url: str) -> None:
+def test_db_reset_refuses_without_yes() -> None:
     result = CliRunner().invoke(app, ["db", "reset"])
     assert result.exit_code == 2
     assert result.output == "refusing without --yes\n"

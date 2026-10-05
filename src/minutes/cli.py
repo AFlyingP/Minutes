@@ -8,6 +8,7 @@ from typer.core import TyperGroup
 from minutes import db, probe
 from minutes.config import Corpus, corpus_database_url, get_settings
 from minutes.errors import ConfigError, GateStaleError, LabelRuleError, LLMQuotaError, MinutesError
+from minutes.ingest import pipeline
 from minutes.log import bind_correlation_id, configure_logging, new_correlation_id
 
 EXIT_CODES: dict[type[MinutesError], int] = {
@@ -32,6 +33,10 @@ probe_app = typer.Typer(no_args_is_help=True)
 db_app = typer.Typer(no_args_is_help=True)
 app.add_typer(probe_app, name="probe")
 app.add_typer(db_app, name="db")
+ingest_app = typer.Typer(no_args_is_help=True)
+fixtures_app = typer.Typer(no_args_is_help=True)
+app.add_typer(ingest_app, name="ingest")
+app.add_typer(fixtures_app, name="fixtures")
 
 
 @app.callback()
@@ -115,3 +120,23 @@ def db_reset(
     for url in urls:
         db.reset(url)
         typer.echo(f"reset {urlsplit(url).path.lstrip('/')}")
+
+
+@ingest_app.command("discover")
+def ingest_discover(
+    city: Annotated[str | None, typer.Option()] = None, corpus: CorpusOption = None
+) -> None:
+    """List meetings from the city sources and add the documents not seen before."""
+    used = use_corpus(corpus)
+    with db.connect(corpus_database_url(used)) as conn:
+        added = pipeline.discover(conn, used, city)
+    typer.echo(f"discovered {added} new documents")
+
+
+@fixtures_app.command("load")
+def fixtures_load() -> None:
+    """Rebuild the test database from the tracked test corpus, with stub models."""
+    os.environ.update(MINUTES_CORPUS="fixture", MINUTES_MODELS_MODE="stub", MINUTES_LLM_MODE="stub")
+    get_settings.cache_clear()
+    count = pipeline.load_fixture_corpus(get_settings().test_database_url)
+    typer.echo(f"loaded {count} documents")
