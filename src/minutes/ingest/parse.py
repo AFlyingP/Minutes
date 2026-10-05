@@ -1,16 +1,21 @@
 import io
-import re
 
 import pdfplumber
 import psycopg
 import pypdfium2
+from pdfplumber.page import Page
+from pdfplumber.utils.exceptions import PdfminerException
 from psycopg.rows import TupleRow
+from psycopg.types.json import Jsonb
 
-from minutes.errors import NotFoundError
+from minutes.errors import NotFoundError, PermanentStageError
+from minutes.ingest.layout import Table, Word, build_text
 
 
-def normalize(text: str) -> str:
-    return "\n".join(re.sub(r" +", " ", line).rstrip() for line in text.split("\n"))
+def image_area_ratio(page: Page) -> float:
+    """Largest image's area as a fraction of the page area."""
+    area = max((image["width"] * image["height"] for image in page.images), default=0.0)
+    return float(area) / float(page.width * page.height)
 
 
 def run(conn: psycopg.Connection[TupleRow], document_id: str) -> dict[str, object]:
@@ -24,12 +29,29 @@ def run(conn: psycopg.Connection[TupleRow], document_id: str) -> dict[str, objec
     conn.execute("DELETE FROM units WHERE document_id = %s", (document_id,))
     if media_type != "application/pdf":
         return {"units": 0, "needs_ocr": 0}
-    with pdfplumber.open(file_path) as pdf:
+    try:
+        pdf = pdfplumber.open(file_path)
+    except PdfminerException as err:
+        raise PermanentStageError("unreadable pdf") from err
+    with pdf:
         for index, page in enumerate(pdf.pages, start=1):
+            words = [
+                Word(word["text"], word["x0"], word["top"], word["x1"], word["bottom"])
+                for word in page.extract_words(x_tolerance=2, y_tolerance=3, keep_blank_chars=False)
+            ]
+            tables = [
+                Table(
+                    table.bbox, [[cell for cell in row.cells if cell is not None] for row in rows]
+                )
+                for table in page.find_tables()
+                if len(rows := table.rows) >= 2 and len(table.columns) >= 2
+            ]
+            text, boxes = build_text(words, tables, page.width, page.height)
             conn.execute(
-                "INSERT INTO units (document_id, unit_index, unit_kind, text, text_source, "
-                "width_pt, height_pt) VALUES (%s, %s, 'page', %s, 'pdf', %s, %s)",
-                (document_id, index, normalize(page.extract_text() or ""), page.width, page.height),
+                "INSERT INTO units (document_id, unit_index, unit_kind, text, boxes, text_source, "
+                "width_pt, height_pt, needs_ocr) "
+                "VALUES (%s, %s, 'page', %s, %s, 'pdf', %s, %s, false)",
+                (document_id, index, text, Jsonb(boxes), page.width, page.height),
             )
         count = len(pdf.pages)
     conn.execute("UPDATE documents SET unit_count = %s WHERE id = %s", (count, document_id))
