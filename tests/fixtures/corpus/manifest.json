@@ -1,0 +1,202 @@
+{
+  "cities": {
+    "alder": {
+      "name": "Alder",
+      "state": "WA",
+      "item_format": "legistar",
+      "bodies": [
+        "City Council",
+        "Land Use Committee"
+      ],
+      "source": "fixture",
+      "sample_seed": 0
+    },
+    "birch": {
+      "name": "Birch",
+      "state": "CA",
+      "item_format": "granicus",
+      "bodies": [
+        "City Council",
+        "Planning Commission"
+      ],
+      "source": "fixture",
+      "sample_seed": 0
+    }
+  },
+  "meetings": [
+    {
+      "id": "alder-101",
+      "city_id": "alder",
+      "body": "City Council",
+      "meeting_date": "2024-02-06",
+      "recording_url": "https://video.invalid/alder/101",
+      "recording_seek": null,
+      "title": "City Council 2024-02-06",
+      "source_key": "101"
+    },
+    {
+      "id": "alder-102",
+      "city_id": "alder",
+      "body": "Land Use Committee",
+      "meeting_date": "2024-03-05",
+      "recording_url": null,
+      "recording_seek": null,
+      "title": "Land Use Committee 2024-03-05",
+      "source_key": "102"
+    },
+    {
+      "id": "birch-201",
+      "city_id": "birch",
+      "body": "City Council",
+      "meeting_date": "2024-03-12",
+      "recording_url": "https://video.invalid/birch/201",
+      "recording_seek": "granicus_entrytime",
+      "title": "City Council 2024-03-12",
+      "source_key": "201"
+    },
+    {
+      "id": "birch-202",
+      "city_id": "birch",
+      "body": "Planning Commission",
+      "meeting_date": "2024-04-09",
+      "recording_url": null,
+      "recording_seek": null,
+      "title": "Planning Commission 2024-04-09",
+      "source_key": "202"
+    }
+  ],
+  "documents": [
+    {
+      "id": "alder-agenda-101",
+      "meeting_id": "alder-101",
+      "city_id": "alder",
+      "kind": "agenda",
+      "media_type": "application/pdf",
+      "file": "alder-agenda-101.pdf",
+      "sha256": "a6f1984c6dfd219136bfc6a6ce4a94b7d703850669945899e5b6b0ee08396c90",
+      "bytes": 3028,
+      "units": 2
+    },
+    {
+      "id": "alder-minutes-101",
+      "meeting_id": "alder-101",
+      "city_id": "alder",
+      "kind": "minutes",
+      "media_type": "application/pdf",
+      "file": "alder-minutes-101.pdf",
+      "sha256": "21ac84325beeca45be1195604002a0882da8b5aa360aaa42eb7cf11ef8c6956d",
+      "bytes": 4555,
+      "units": 3
+    },
+    {
+      "id": "alder-transcript-101",
+      "meeting_id": "alder-101",
+      "city_id": "alder",
+      "kind": "transcript",
+      "media_type": "application/x-subrip",
+      "file": "alder-transcript-101.srt",
+      "sha256": "282b7d56825973b8b52efb0f6bdb52bbdc751e62954c670a8bf551fbaf5f6cae",
+      "bytes": 538,
+      "units": 2
+    },
+    {
+      "id": "alder-agenda-102",
+      "meeting_id": "alder-102",
+      "city_id": "alder",
+      "kind": "agenda",
+      "media_type": "application/pdf",
+      "file": "alder-agenda-102.pdf",
+      "sha256": "59ffac66d4c5c631e764e7bd974b9167d302c2960a4caa16b970c2fdd9a5f471",
+      "bytes": 3247,
+      "units": 2
+    },
+    {
+      "id": "alder-minutes-102",
+      "meeting_id": "alder-102",
+      "city_id": "alder",
+      "kind": "minutes",
+      "media_type": "application/pdf",
+      "file": "alder-minutes-102.pdf",
+      "sha256": "97d758759d818e9a9f72ea35e2be8a317a1b4e34bad04ba154120bf91c7881da",
+      "bytes": 2383,
+      "units": 1
+    },
+    {
+      "id": "alder-transcript-102",
+      "meeting_id": "alder-102",
+      "city_id": "alder",
+      "kind": "transcript",
+      "media_type": "application/x-subrip",
+      "file": "alder-transcript-102.srt",
+      "sha256": "996dc059e29f6b4903c9122c60eb60eda2663b3b9c062eb9962ef4de7960ec5a",
+      "bytes": 277,
+      "units": 1
+    },
+    {
+      "id": "birch-agenda-201",
+      "meeting_id": "birch-201",
+      "city_id": "birch",
+      "kind": "agenda",
+      "media_type": "application/pdf",
+      "file": "birch-agenda-201.pdf",
+      "sha256": "181231773aa1943ee603032189dc7798abda0b2b34bcd18aaa2c9ce73436193a",
+      "bytes": 2883,
+      "units": 2
+    },
+    {
+      "id": "birch-minutes-201",
+      "meeting_id": "birch-201",
+      "city_id": "birch",
+      "kind": "minutes",
+      "media_type": "application/pdf",
+      "file": "birch-minutes-201.pdf",
+      "sha256": "cbae8f19b3cbebdb856f2266d269d3d3a3689969c27ae0879f89eac34e814d4b",
+      "bytes": 34682,
+      "units": 3
+    },
+    {
+      "id": "birch-transcript-201",
+      "meeting_id": "birch-201",
+      "city_id": "birch",
+      "kind": "transcript",
+      "media_type": "text/vtt",
+      "file": "birch-transcript-201.vtt",
+      "sha256": "86f408756d684bdb507c22f6d02139f1b622e11a50c6fd6488bca161faeb781a",
+      "bytes": 504,
+      "units": 2
+    },
+    {
+      "id": "birch-agenda-202",
+      "meeting_id": "birch-202",
+      "city_id": "birch",
+      "kind": "agenda",
+      "media_type": "application/pdf",
+      "file": "birch-agenda-202.pdf",
+      "sha256": "3ca2ee35a9360d995a504c2b4f84af7f14ba4ade4413d27e4e8ca4412734a711",
+      "bytes": 3144,
+      "units": 2
+    },
+    {
+      "id": "birch-minutes-202",
+      "meeting_id": "birch-202",
+      "city_id": "birch",
+      "kind": "minutes",
+      "media_type": "application/pdf",
+      "file": "birch-minutes-202.pdf",
+      "sha256": "a8e02853c59fc2d298da93d74409ec3f9ee965814a773ba05ebe49007e764e3a",
+      "bytes": 2803,
+      "units": 2
+    },
+    {
+      "id": "birch-transcript-202",
+      "meeting_id": "birch-202",
+      "city_id": "birch",
+      "kind": "transcript",
+      "media_type": "text/vtt",
+      "file": "birch-transcript-202.vtt",
+      "sha256": "2eb697750ed3070910eaa7c6a6910358d66c4e6631a72f33d62dd831d22b1038",
+      "bytes": 322,
+      "units": 1
+    }
+  ]
+}

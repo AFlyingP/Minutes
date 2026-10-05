@@ -1,0 +1,538 @@
+{
+  "cities": {
+    "alder": {
+      "name": "Alder",
+      "state": "WA",
+      "item_format": "legistar",
+      "bodies": [
+        "City Council",
+        "Land Use Committee"
+      ]
+    },
+    "birch": {
+      "name": "Birch",
+      "state": "CA",
+      "item_format": "granicus",
+      "bodies": [
+        "City Council",
+        "Planning Commission"
+      ]
+    }
+  },
+  "meetings": [
+    {
+      "id": "alder-101",
+      "city_id": "alder",
+      "body": "City Council",
+      "meeting_date": "2024-02-06",
+      "recording_url": "https://video.invalid/alder/101",
+      "recording_seek": null
+    },
+    {
+      "id": "alder-102",
+      "city_id": "alder",
+      "body": "Land Use Committee",
+      "meeting_date": "2024-03-05",
+      "recording_url": null,
+      "recording_seek": null
+    },
+    {
+      "id": "birch-201",
+      "city_id": "birch",
+      "body": "City Council",
+      "meeting_date": "2024-03-12",
+      "recording_url": "https://video.invalid/birch/201",
+      "recording_seek": "granicus_entrytime"
+    },
+    {
+      "id": "birch-202",
+      "city_id": "birch",
+      "body": "Planning Commission",
+      "meeting_date": "2024-04-09",
+      "recording_url": null,
+      "recording_seek": null
+    }
+  ],
+  "documents": [
+    {
+      "id": "alder-agenda-101",
+      "meeting_id": "alder-101",
+      "kind": "agenda",
+      "pages": [
+        {
+          "layout": "single",
+          "lines": [
+            "City Council Agenda February 6, 2024",
+            "A. CALL TO ORDER",
+            "B. ROLL CALL",
+            "C. PRESENTATIONS",
+            "D. PUBLIC COMMENT",
+            "E. ADOPTION OF INTRODUCTION AND REFERRAL CALENDAR:",
+            "IRC 11 February 6, 2024",
+            "F. APPROVAL OF THE AGENDA",
+            "G. APPROVAL OF CONSENT CALENDAR",
+            "1. Min 21 January 30, 2024"
+          ]
+        },
+        {
+          "layout": "single",
+          "lines": [
+            "City Council Agenda February 6, 2024",
+            "H. COMMITTEE REPORTS",
+            "1. CB 3001 AN ORDINANCE relating to sidewalk repair; authorizing",
+            "a contract of $250,000 with Cedar Paving LLC.",
+            "The Committee recommends that City Council pass the Council Bill (CB).",
+            "In Favor: 3 - Abbott, Chen, Diaz",
+            "Opposed: None",
+            "J. ADOPTION OF OTHER RESOLUTIONS",
+            "2. Res 4001 A RESOLUTION setting a public hearing on the Harbor",
+            "Street alley vacation.",
+            "K. OTHER BUSINESS",
+            "L. ADJOURNMENT"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "alder-minutes-101",
+      "meeting_id": "alder-101",
+      "kind": "minutes",
+      "pages": [
+        {
+          "layout": "single",
+          "lines": [
+            "City Council Meeting Minutes February 6, 2024",
+            "A. CALL TO ORDER",
+            "The meeting was called to order at 2:00 p.m., with Council President Abbott",
+            "presiding.",
+            "B. ROLL CALL",
+            "Present: 5 - Abbott, Chen, Diaz, Evans, Flores",
+            "D. PUBLIC COMMENT",
+            "The following individuals addressed the Council:",
+            "Maria Lopez",
+            "Sam Patel",
+            "E. ADOPTION OF INTRODUCTION AND REFERRAL CALENDAR:",
+            "IRC 11 February 6, 2024",
+            "By unanimous consent, the Introduction and Referral Calendar was adopted."
+          ]
+        },
+        {
+          "layout": "single",
+          "lines": [
+            "City Council Meeting Minutes February 6, 2024",
+            "G. APPROVAL OF CONSENT CALENDAR",
+            "Motion was made by Councilmember Chen, duly seconded by Councilmember Diaz,",
+            "and carried, to adopt the Consent Calendar.",
+            "1. Min 21 January 30, 2024",
+            "The item was adopted on the Consent Calendar by the following vote:",
+            "In Favor: 5 - Abbott, Chen, Diaz, Evans, Flores",
+            "Opposed: None",
+            "H. COMMITTEE REPORTS",
+            "1. CB 3001 AN ORDINANCE relating to sidewalk repair; authorizing",
+            "a contract of $250,000 with Cedar Paving LLC."
+          ]
+        },
+        {
+          "layout": "single",
+          "lines": [
+            "City Council Meeting Minutes February 6, 2024",
+            "The Council Bill (CB) was passed by the following vote:",
+            "In Favor: 4 - Abbott, Chen, Diaz, Evans",
+            "Opposed: 1 - Flores",
+            "J. ADOPTION OF OTHER RESOLUTIONS",
+            "2. Res 4001 A RESOLUTION setting a public hearing on the Harbor",
+            "Street alley vacation.",
+            "The Resolution (Res) was adopted by the following vote:",
+            "In Favor: 5 - Abbott, Chen, Diaz, Evans, Flores",
+            "Opposed: None",
+            "L. ADJOURNMENT",
+            "There being no further business, the meeting was adjourned at 3:10 p.m."
+          ]
+        }
+      ]
+    },
+    {
+      "id": "alder-transcript-101",
+      "meeting_id": "alder-101",
+      "kind": "transcript",
+      "cues": [
+        [
+          0,
+          4000,
+          "-- GOOD AFTERNOON. THE FEBRUARY 6 MEETING OF THE CITY COUNCIL WILL COME TO ORDER."
+        ],
+        [
+          4000,
+          9000,
+          "-- WILL THE CLERK PLEASE CALL THE ROLL?"
+        ],
+        [
+          9000,
+          15000,
+          "-- WE NOW MOVE TO COUNCIL BILL 3001 ON SIDEWALK REPAIR."
+        ],
+        [
+          15000,
+          23000,
+          "-- COUNCILMEMBER FLORES: I WILL BE VOTING NO ON THE CEDAR PAVING CONTRACT BECAUSE OF THE COST."
+        ],
+        [
+          23000,
+          29000,
+          "-- THE BILL PASSES AND THE CHAIR WILL SIGN IT."
+        ],
+        [
+          70000,
+          76000,
+          "-- WE ARE ADJOURNED."
+        ]
+      ]
+    },
+    {
+      "id": "alder-agenda-102",
+      "meeting_id": "alder-102",
+      "kind": "agenda",
+      "pages": [
+        {
+          "layout": "two_column",
+          "left": [
+            "Land Use Committee Agenda",
+            "March 5, 2024 at 9:30 a.m.",
+            "Council Chamber, City Hall",
+            "Members of the public may",
+            "sign up to address the",
+            "Committee for up to two",
+            "minutes on matters on this",
+            "agenda during the comment period."
+          ],
+          "right": [
+            "Committee members are",
+            "Abbott, Chair; Chen, Vice",
+            "Chair; and Diaz, Member.",
+            "Written comments may be",
+            "sent to the clerk before",
+            "the meeting begins and",
+            "are placed in the record",
+            "for the Committee to read."
+          ]
+        },
+        {
+          "layout": "single",
+          "lines": [
+            "Land Use Committee Agenda March 5, 2024",
+            "A. CALL TO ORDER",
+            "B. APPROVAL OF THE AGENDA",
+            "C. PUBLIC COMMENT",
+            "D. ITEMS OF BUSINESS",
+            "1. CB 3002 AN ORDINANCE relating to land use and zoning; amending",
+            "the height limit in the Mill District to 65 feet.",
+            "2. Appt 501 Appointment of Dana Reyes as member, Design Review Board,",
+            "for a term to April 30, 2026.",
+            "E. ADJOURNMENT"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "alder-minutes-102",
+      "meeting_id": "alder-102",
+      "kind": "minutes",
+      "pages": [
+        {
+          "layout": "single",
+          "lines": [
+            "Land Use Committee Meeting Minutes March 5, 2024",
+            "A. CALL TO ORDER",
+            "The meeting was called to order at 9:31 a.m., with Chair Abbott presiding.",
+            "D. ITEMS OF BUSINESS",
+            "1. CB 3002 AN ORDINANCE relating to land use and zoning; amending",
+            "the height limit in the Mill District to 65 feet.",
+            "The Committee recommends that City Council pass the Council Bill (CB).",
+            "In Favor: 3 - Abbott, Chen, Diaz",
+            "Opposed: None",
+            "2. Appt 501 Appointment of Dana Reyes as member, Design Review Board,",
+            "for a term to April 30, 2026.",
+            "The Committee recommends that City Council confirm the Appointment (Appt).",
+            "In Favor: 3 - Abbott, Chen, Diaz",
+            "Opposed: None",
+            "E. ADJOURNMENT"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "alder-transcript-102",
+      "meeting_id": "alder-102",
+      "kind": "transcript",
+      "cues": [
+        [
+          0,
+          5000,
+          "-- GOOD MORNING. THE LAND USE COMMITTEE WILL COME TO ORDER."
+        ],
+        [
+          5000,
+          12000,
+          "-- COUNCIL BILL 3002 CHANGES THE HEIGHT LIMIT IN THE MILL DISTRICT TO 65 FEET."
+        ],
+        [
+          12000,
+          18000,
+          "-- THE BILL IS RECOMMENDED FOR PASSAGE."
+        ]
+      ]
+    },
+    {
+      "id": "birch-agenda-201",
+      "meeting_id": "birch-201",
+      "kind": "agenda",
+      "pages": [
+        {
+          "layout": "single",
+          "lines": [
+            "CITY OF BIRCH",
+            "REGULAR MEETING - CITY COUNCIL",
+            "March 12, 2024",
+            "1. CALL TO ORDER",
+            "2. ROLL CALL",
+            "3. PLEDGE OF ALLEGIANCE",
+            "8. PRESENTATIONS",
+            "9. CONSENT",
+            "10. PUBLIC HEARINGS",
+            "11. GENERAL BUSINESS",
+            "12. ADJOURNMENT"
+          ]
+        },
+        {
+          "layout": "single",
+          "lines": [
+            "8.A Proclamation Recognizing March 2024 as Youth Arts Month.",
+            "9.A Approval of Meeting Minutes of February 27, 2024.",
+            "9.B Adopt a Resolution Authorizing the City Manager to Execute an Agreement",
+            "with Granite Works Inc. for the Oak Street Sidewalk Repair Project in the",
+            "Amount of $184,500.",
+            "10.A Adopt a Resolution Approving the Tentative Subdivision Map for the",
+            "Willow Creek Project.",
+            "11.A Introduce an Ordinance Amending Title 15 (Building and Construction)."
+          ]
+        }
+      ]
+    },
+    {
+      "id": "birch-minutes-201",
+      "meeting_id": "birch-201",
+      "kind": "minutes",
+      "pages": [
+        {
+          "layout": "single",
+          "lines": [
+            "MINUTES",
+            "CITY OF BIRCH CITY COUNCIL",
+            "Regular Meeting",
+            "March 12, 2024",
+            "1. CALL TO ORDER by Mayor Gray at 6:00 PM.",
+            "2. ROLL CALL Councilmembers present: Gray, Hale, Ivers, Jones, King",
+            "8. PRESENTATIONS",
+            "8.A Proclamation Recognizing March 2024 as Youth Arts Month.",
+            "9. CONSENT",
+            "9.A Approval of Meeting Minutes of February 27, 2024.",
+            "9.B Adopt RESOLUTION 2024-07 Awarding a Construction Contract to",
+            "Granite Works Inc. for the Oak Street Sidewalk Repair Project in the",
+            "Amount of $184,500."
+          ]
+        },
+        {
+          "layout": "single",
+          "lines": [
+            "Page 2 of 3",
+            "Councilmember Gray motioned to approve, motion was seconded by",
+            "Councilmember Hale. Passed by the following roll call vote:",
+            "Ayes: Gray, Hale, Ivers, Jones",
+            "Noes: King",
+            "Absent: None",
+            "Abstain: None",
+            "10. PUBLIC HEARINGS",
+            "10.A Adopt RESOLUTION 2024-08 Approving the Tentative Subdivision Map",
+            "for the Willow Creek Project.",
+            "Councilmember Hale motioned to approve, motion was seconded by",
+            "Councilmember Ivers. Passed by the following roll call vote:"
+          ],
+          "table": {
+            "after_line": 12,
+            "rows": [
+              [
+                "Member",
+                "Vote"
+              ],
+              [
+                "Gray",
+                "Aye"
+              ],
+              [
+                "Hale",
+                "Aye"
+              ],
+              [
+                "Ivers",
+                "Aye"
+              ],
+              [
+                "Jones",
+                "Aye"
+              ],
+              [
+                "King",
+                "Aye"
+              ]
+            ]
+          }
+        },
+        {
+          "layout": "scanned",
+          "lines": [
+            "Page 3 of 3",
+            "11. GENERAL BUSINESS",
+            "11.A Introduce ORDINANCE 1042 Amending Title 15 (Building and Construction).",
+            "Councilmember Jones motioned to introduce, motion was seconded by",
+            "Councilmember King. Passed by the following roll call vote:",
+            "Ayes: Gray, Hale, Ivers, Jones, King",
+            "Noes: None",
+            "12. ADJOURNMENT at 7:15 PM."
+          ]
+        }
+      ]
+    },
+    {
+      "id": "birch-transcript-201",
+      "meeting_id": "birch-201",
+      "kind": "transcript",
+      "cues": [
+        [
+          0,
+          5000,
+          "SPEAKER 1 (COUNCIL): GOOD EVENING AND WELCOME TO THE MARCH 12 MEETING OF THE BIRCH CITY COUNCIL."
+        ],
+        [
+          5000,
+          11000,
+          "SPEAKER 2 (COUNCIL): ITEM 9.B IS THE OAK STREET SIDEWALK REPAIR CONTRACT."
+        ],
+        [
+          11000,
+          19000,
+          "SPEAKER 3 (COUNCIL): I CANNOT SUPPORT THE GRANITE WORKS CONTRACT AT THIS PRICE."
+        ],
+        [
+          19000,
+          24000,
+          "SPEAKER 1 (COUNCIL): THE MOTION PASSES FOUR TO ONE."
+        ],
+        [
+          90000,
+          95000,
+          "SPEAKER 1 (COUNCIL): WE ARE ADJOURNED."
+        ]
+      ]
+    },
+    {
+      "id": "birch-agenda-202",
+      "meeting_id": "birch-202",
+      "kind": "agenda",
+      "pages": [
+        {
+          "layout": "two_column",
+          "left": [
+            "CITY OF BIRCH",
+            "Planning Commission notice",
+            "City Hall, 200 Birch Avenue",
+            "Persons wishing to address",
+            "the Commission are asked to",
+            "complete a speaker card and",
+            "give it to staff before the",
+            "item is called by the Chair."
+          ],
+          "right": [
+            "Agenda materials can be",
+            "read at the front counter",
+            "during business hours and",
+            "are posted outside City",
+            "Hall. Speakers are limited",
+            "to three minutes each so",
+            "that every person present",
+            "has time to be heard."
+          ]
+        },
+        {
+          "layout": "single",
+          "lines": [
+            "PLANNING COMMISSION REGULAR MEETING",
+            "April 9, 2024",
+            "1. CALL TO ORDER",
+            "2. ROLL CALL",
+            "3. PUBLIC COMMENT ON NON-AGENDA ITEMS",
+            "4. PUBLIC HEARINGS",
+            "4.A Conditional Use Permit for a Restaurant at 120 Main Street.",
+            "4.B Zoning Variance Request for 45 Elm Court (Setback Reduction).",
+            "5. ADJOURNMENT"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "birch-minutes-202",
+      "meeting_id": "birch-202",
+      "kind": "minutes",
+      "pages": [
+        {
+          "layout": "single",
+          "lines": [
+            "MINUTES",
+            "CITY OF BIRCH PLANNING COMMISSION",
+            "Regular Meeting",
+            "April 9, 2024",
+            "1. CALL TO ORDER by Chair Lee at 6:00 PM.",
+            "2. ROLL CALL Commissioners present: Lee, Moss, Nunez, Ortiz, Park",
+            "4. PUBLIC HEARINGS",
+            "4.A Conditional Use Permit for a Restaurant at 120 Main Street.",
+            "Dana Wu, Associate Planner presented to the Commission. The item was",
+            "continued to the meeting of May 14, 2024."
+          ]
+        },
+        {
+          "layout": "single",
+          "lines": [
+            "Page 2 of 2",
+            "4.B Zoning Variance Request for 45 Elm Court (Setback Reduction).",
+            "Commissioner Lee motioned to deny, motion was seconded by Commissioner",
+            "Moss. Passed by the following roll call vote:",
+            "Ayes: Lee, Moss, Nunez",
+            "Noes: Ortiz, Park",
+            "5. ADJOURNMENT at 6:48 PM."
+          ]
+        }
+      ]
+    },
+    {
+      "id": "birch-transcript-202",
+      "meeting_id": "birch-202",
+      "kind": "transcript",
+      "cues": [
+        [
+          0,
+          6000,
+          "SPEAKER 1 (COUNCIL): THE PLANNING COMMISSION WILL COME TO ORDER."
+        ],
+        [
+          6000,
+          14000,
+          "SPEAKER 2 (COUNCIL): THE SETBACK REDUCTION AT 45 ELM COURT DOES NOT MEET THE VARIANCE FINDINGS."
+        ],
+        [
+          14000,
+          20000,
+          "SPEAKER 1 (COUNCIL): THE MOTION TO DENY PASSES THREE TO TWO."
+        ]
+      ]
+    }
+  ]
+}
