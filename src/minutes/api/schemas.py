@@ -3,6 +3,8 @@ from typing import Literal
 
 from pydantic import BaseModel
 
+from minutes.labels.schema import Label, LabelType
+
 DocKind = Literal["agenda", "minutes", "transcript"]
 SearchMode = Literal["keyword", "vector", "hybrid", "hybrid_rerank"]
 Chunker = Literal["fixed", "item"]
@@ -108,3 +110,54 @@ class AskOut(BaseModel):
     latency_ms: int
     cached: bool
     dropped_sentences: int
+
+
+class LabelsOut(BaseModel):
+    labels: list[Label]
+
+
+class ReviewIn(BaseModel):
+    human_reviewed: bool
+
+
+class LabelProgress(BaseModel):
+    count: int
+    violations: list[str]
+
+
+class LabelsProgressOut(BaseModel):
+    frozen: bool
+    types: dict[str, LabelProgress]
+    human_reviewed: dict[str, int]
+
+
+class TextMatchOut(BaseModel):
+    document_id: str
+    unit_index: int
+    snippet: str
+
+
+class TextSearchOut(BaseModel):
+    unit_count: int
+    matches: list[TextMatchOut]
+
+
+class SampleMeetingOut(BaseModel):
+    meeting_id: str
+    body: str
+    meeting_date: date
+    agenda_document_id: str
+    labelled: bool
+
+
+class SampleMeetingsOut(BaseModel):
+    meetings: list[SampleMeetingOut]
+
+
+class LabelExportIn(BaseModel):
+    type: LabelType
+
+
+class LabelExportOut(BaseModel):
+    path: str
+    count: int

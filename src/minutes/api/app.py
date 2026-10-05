@@ -6,12 +6,14 @@ from fastapi import FastAPI, Request, Response
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, JSONResponse
 
-from minutes.api import routes_core
+from minutes.api import routes_core, routes_labels
 from minutes.config import ROOT
 from minutes.errors import (
     DatabaseError,
+    LabelRuleError,
     LabelsFrozenError,
     LabelsNotFrozenError,
+    LabelValidationError,
     LLMQuotaError,
     LLMTransportError,
     MinutesError,
@@ -33,6 +35,8 @@ ERROR_RESPONSES: dict[type[MinutesError], tuple[int, str, bool]] = {
     LLMQuotaError: (503, "llm_quota", False),
     LabelsFrozenError: (409, "labels_frozen", False),
     LabelsNotFrozenError: (409, "labels_not_frozen", False),
+    LabelValidationError: (422, "label_invalid", True),
+    LabelRuleError: (409, "label_rules", True),
 }
 
 log = get_logger("api")
@@ -41,6 +45,7 @@ log = get_logger("api")
 def create_app() -> FastAPI:
     app = FastAPI(title="Minutes")
     app.include_router(routes_core.router)
+    app.include_router(routes_labels.router)
 
     @app.middleware("http")
     async def correlation_id(
@@ -67,7 +72,11 @@ def create_app() -> FastAPI:
         if type(err) not in ERROR_RESPONSES:
             return await unknown_error(request, err)
         status, code, with_detail = ERROR_RESPONSES[type(err)]
-        body = {"error": code, "detail": str(err)} if with_detail else {"error": code}
+        body: dict[str, object] = {"error": code}
+        if with_detail:
+            body["detail"] = (
+                err.args[0] if isinstance(err, (LabelValidationError, LabelRuleError)) else str(err)
+            )
         return JSONResponse(body, status_code=status)
 
     @app.exception_handler(RequestValidationError)

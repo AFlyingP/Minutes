@@ -1,20 +1,34 @@
+import json
 import os
 from datetime import datetime
-from typing import Annotated, Any, NoReturn
+from pathlib import Path
+from typing import Annotated, Any, Literal, NoReturn
 from urllib.parse import urlsplit
 
 import typer
 import uvicorn
+from pydantic import ValidationError as PayloadError
 from typer.core import TyperGroup
 
 from minutes import corpus, db, probe, queue, worker
 from minutes.answer.pipeline import answer
 from minutes.api.app import create_app
 from minutes.api.schemas import Chunker, Pipeline, SearchMode
-from minutes.config import Corpus, corpus_database_url, get_settings
+from minutes.config import Corpus, corpus_database_url, get_settings, load_cities
 from minutes.corpus import assert_minimums, corpus_stats
-from minutes.errors import ConfigError, GateStaleError, LabelRuleError, LLMQuotaError, MinutesError
+from minutes.errors import (
+    ConfigError,
+    GateStaleError,
+    LabelRuleError,
+    LabelValidationError,
+    LLMQuotaError,
+    MinutesError,
+    NotFoundError,
+)
 from minutes.ingest import pipeline, quality
+from minutes.labels import export, store
+from minutes.labels.rules import PRODUCTION_RULES, check
+from minutes.labels.schema import LabelIn, LabelType
 from minutes.log import bind_correlation_id, configure_logging, get_logger, new_correlation_id
 from minutes.retrieval.search import Filters, city_names, hit_heading, search, span_label
 
@@ -31,7 +45,13 @@ class ErrorGroup(TyperGroup):
         try:
             return super().invoke(ctx)
         except MinutesError as err:
-            typer.echo(f"error: {err}", err=True)
+            messages = (
+                err.args[0]
+                if isinstance(err, (LabelRuleError, LabelValidationError))
+                else [str(err)]
+            )
+            for message in messages:
+                typer.echo(f"error: {message}", err=True)
             raise typer.Exit(EXIT_CODES.get(type(err), 1)) from err
 
 
@@ -45,11 +65,16 @@ worker_app = typer.Typer(no_args_is_help=True)
 jobs_app = typer.Typer(no_args_is_help=True)
 fixtures_app = typer.Typer(no_args_is_help=True)
 corpus_app = typer.Typer(no_args_is_help=True)
+labels_app = typer.Typer(no_args_is_help=True)
 app.add_typer(ingest_app, name="ingest")
 app.add_typer(worker_app, name="worker")
 app.add_typer(jobs_app, name="jobs")
 app.add_typer(fixtures_app, name="fixtures")
 app.add_typer(corpus_app, name="corpus")
+app.add_typer(labels_app, name="labels")
+
+LABELS_DIR = Path("eval/labels")
+LABEL_RULES = PRODUCTION_RULES
 
 
 @app.callback()
@@ -139,6 +164,16 @@ def db_reset(
     for url in urls:
         db.reset(url)
         typer.echo(f"reset {urlsplit(url).path.lstrip('/')}")
+        if everything and url == settings.database_url:
+            with db.connect(url) as conn:
+                # The reset removes cities, which the imported labels reference.
+                for city, config in load_cities("full").items():
+                    conn.execute(
+                        "INSERT INTO cities (id, name, state, item_format) VALUES (%s, %s, %s, %s)",
+                        (city, config.name, config.state, config.item_format),
+                    )
+                count = export.import_all(conn, LABELS_DIR)
+            typer.echo(f"imported {count} labels")
 
 
 @ingest_app.command("discover")
@@ -181,6 +216,8 @@ def ingest_run(
             "in that order"
         )
     used = use_corpus(corpus)
+    if used != "fixture" and any(stage in pipeline.LABEL_GATED_STAGES for stage in names):
+        store.require_frozen(LABELS_DIR)
     totals = [0, 0, 0, 0]
     for stage in names:
         with db.connect(corpus_database_url(used)) as conn:
@@ -298,6 +335,218 @@ BodyOption = Annotated[str | None, typer.Option()]
 DateOption = Annotated[datetime | None, typer.Option(formats=["%Y-%m-%d"])]
 KindOption = Annotated[str | None, typer.Option()]
 
+PayloadFile = Annotated[Path, typer.Option("--payload-file", exists=True, dir_okay=False)]
+
+
+def _read_payload(path: Path) -> dict[str, object]:
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as err:
+        raise LabelValidationError([f"payload: {err}"]) from err
+    if not isinstance(payload, dict):
+        raise LabelValidationError(["payload: must be a JSON object"])
+    return payload
+
+
+def _label_input(**fields: object) -> LabelIn:
+    try:
+        return LabelIn.model_validate(fields)
+    except PayloadError as err:
+        raise LabelValidationError(
+            [
+                f"{'.'.join(str(part) for part in error['loc'])}: {error['msg']}"
+                for error in err.errors()
+            ]
+        ) from err
+
+
+@labels_app.command("add")
+def labels_add(
+    type: Annotated[LabelType, typer.Option("--type")],
+    city: Annotated[str, typer.Option()],
+    payload_file: PayloadFile,
+    author: Annotated[Literal["agent", "human"], typer.Option()] = "agent",
+    note: Annotated[str, typer.Option()] = "",
+    corpus: CorpusOption = None,
+) -> None:
+    label = _label_input(
+        type=type, city=city, author=author, note=note, payload=_read_payload(payload_file)
+    )
+    with db.connect(corpus_database_url(use_corpus(corpus))) as conn:
+        created = store.create(conn, label, labels_dir=LABELS_DIR)
+    typer.echo(created.id)
+
+
+@labels_app.command("update")
+def labels_update(
+    id: str,
+    payload_file: PayloadFile,
+    note: Annotated[str | None, typer.Option()] = None,
+    corpus: CorpusOption = None,
+) -> None:
+    payload = _read_payload(payload_file)
+    with db.connect(corpus_database_url(use_corpus(corpus))) as conn:
+        existing = store.get(conn, id)
+        label = _label_input(
+            type=existing.type,
+            city=existing.city,
+            author=existing.author,
+            note=existing.note if note is None else note,
+            payload=payload,
+        )
+        store.update(conn, id, label, labels_dir=LABELS_DIR)
+    typer.echo(f"updated {id}")
+
+
+@labels_app.command("delete")
+def labels_delete(id: str, corpus: CorpusOption = None) -> None:
+    with db.connect(corpus_database_url(use_corpus(corpus))) as conn:
+        store.delete(conn, id, labels_dir=LABELS_DIR)
+    typer.echo(f"deleted {id}")
+
+
+@labels_app.command("show")
+def labels_show(id: str, corpus: CorpusOption = None) -> None:
+    with db.connect(corpus_database_url(use_corpus(corpus))) as conn:
+        label = store.get(conn, id)
+    typer.echo(label.model_dump_json(indent=2))
+
+
+@labels_app.command("list")
+def labels_list(
+    type: Annotated[LabelType | None, typer.Option("--type")] = None,
+    city: CityOption = None,
+    corpus: CorpusOption = None,
+) -> None:
+    with db.connect(corpus_database_url(use_corpus(corpus))) as conn:
+        labels = store.list_labels(conn, type, city)
+    for label in labels:
+        typer.echo(
+            f"{label.id} {label.type} {label.city} reviewed={str(label.human_reviewed).lower()}"
+        )
+
+
+@labels_app.command("page")
+def labels_page(
+    document_id: str,
+    unit_index: int,
+    find: Annotated[str | None, typer.Option()] = None,
+    corpus: CorpusOption = None,
+) -> None:
+    with db.connect(corpus_database_url(use_corpus(corpus))) as conn:
+        row = conn.execute(
+            "SELECT u.text FROM units u JOIN documents d ON d.id = u.document_id "
+            "WHERE u.document_id = %s AND u.unit_index = %s AND d.status = 'downloaded'",
+            (document_id, unit_index),
+        ).fetchone()
+    if row is None:
+        raise NotFoundError(f"unknown unit {document_id} {unit_index}")
+    text: str = row[0]
+    if find is None:
+        typer.echo(text)
+        return
+    if not find:
+        raise LabelValidationError(["find must not be empty"])
+    start = text.find(find)
+    if start == -1:
+        raise typer.Exit(1)
+    while start != -1:
+        end = start + len(find)
+        typer.echo(f"start={start} end={end} text={text[start:end]}")
+        start = text.find(find, end)
+
+
+@labels_app.command("text-search")
+def labels_text_search(
+    query: str, city: Annotated[str, typer.Option()], corpus: CorpusOption = None
+) -> None:
+    with db.connect(corpus_database_url(use_corpus(corpus))) as conn:
+        result = store.text_search(conn, city, query)
+    typer.echo(f"unit_count={result.unit_count}")
+    for document, index, snippet in result.matches:
+        typer.echo(f"{document} {index} {snippet}")
+
+
+@labels_app.command("sample-meetings")
+def labels_sample_meetings(
+    city: Annotated[str, typer.Option()], corpus: CorpusOption = None
+) -> None:
+    with db.connect(corpus_database_url(use_corpus(corpus))) as conn:
+        ids = store.sample_meetings(conn, city)
+        agendas = dict(
+            conn.execute(
+                "SELECT meeting_id, id FROM documents WHERE meeting_id = ANY(%s) "
+                "AND kind = 'agenda' AND status = 'downloaded'",
+                (ids,),
+            ).fetchall()
+        )
+    for meeting in ids:
+        typer.echo(f"{meeting} {agendas[meeting]}")
+
+
+@labels_app.command("progress")
+def labels_progress(corpus: CorpusOption = None) -> None:
+    with db.connect(corpus_database_url(use_corpus(corpus))) as conn:
+        labels = store.list_labels(conn)
+        doc_kinds = export.document_kinds(conn)
+    for label_type in export.LABEL_FILES:
+        typer.echo(f"{label_type} count={sum(label.type == label_type for label in labels)}")
+        for message in check(label_type, labels, LABEL_RULES, doc_kinds):
+            typer.echo(message)
+
+
+@labels_app.command("export")
+def labels_export(
+    type: Annotated[LabelType | None, typer.Option("--type")] = None,
+    everything: Annotated[bool, typer.Option("--all")] = False,
+    corpus: CorpusOption = None,
+) -> None:
+    if (type is None) == (not everything):
+        raise typer.BadParameter("choose either --type or --all")
+    types = list(export.LABEL_FILES) if everything else [type]
+    with db.connect(corpus_database_url(use_corpus(corpus))) as conn:
+        for label_type in types:
+            assert label_type is not None
+            path = export.export_type(conn, label_type, LABELS_DIR, LABEL_RULES)
+            count = len(store.list_labels(conn, label_type))
+            typer.echo(f"wrote {path.as_posix()} ({count} labels)")
+
+
+@labels_app.command("import")
+def labels_import(corpus: CorpusOption = None) -> None:
+    with db.connect(corpus_database_url(use_corpus(corpus))) as conn:
+        count = export.import_all(conn, LABELS_DIR)
+    typer.echo(f"imported {count} labels")
+
+
+@labels_app.command("backup")
+def labels_backup(corpus: CorpusOption = None) -> None:
+    with db.connect(corpus_database_url(use_corpus(corpus))) as conn:
+        export.backup(conn)
+        count = len(store.list_labels(conn))
+    typer.echo(f"backed up {count} labels")
+
+
+@labels_app.command("restore")
+def labels_restore(corpus: CorpusOption = None) -> None:
+    with db.connect(corpus_database_url(use_corpus(corpus))) as conn:
+        count = export.restore(conn)
+    typer.echo(f"restored {count} labels")
+
+
+@labels_app.command("freeze")
+def labels_freeze() -> None:
+    export.freeze(LABELS_DIR, LABEL_RULES)
+    typer.echo("frozen")
+
+
+@labels_app.command("amend")
+def labels_amend(
+    file: Annotated[str, typer.Option()], reason: Annotated[str, typer.Option()]
+) -> None:
+    export.amend(file, reason, LABELS_DIR)
+    typer.echo(f"amended {file}")
+
 
 def as_filters(
     city: str | None,
@@ -329,8 +578,11 @@ def search_command(
     corpus: CorpusOption = None,
 ) -> None:
     """Search the indexed records and print one line per hit."""
+    used = use_corpus(corpus)
+    if used != "fixture":
+        store.require_frozen(LABELS_DIR)
     filters = as_filters(city, body, date_from, date_to, kind)
-    with db.connect(corpus_database_url(use_corpus(corpus))) as conn:
+    with db.connect(corpus_database_url(used)) as conn:
         hits = search(conn, query, filters, mode=mode, chunker=chunker, k=k)
         names = city_names(conn)
     for hit in hits:
@@ -353,8 +605,11 @@ def ask_command(
     corpus: CorpusOption = None,
 ) -> None:
     """Answer a question from the indexed records, with citations."""
+    used = use_corpus(corpus)
+    if used != "fixture":
+        store.require_frozen(LABELS_DIR)
     filters = as_filters(city, body, date_from, date_to, kind)
-    with db.connect(corpus_database_url(use_corpus(corpus))) as conn:
+    with db.connect(corpus_database_url(used)) as conn:
         result = answer(
             conn,
             question,
