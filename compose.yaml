@@ -1,0 +1,36 @@
+name: minutes
+services:
+  db:
+    image: pgvector/pgvector:0.8.1-pg17
+    environment:
+      POSTGRES_USER: minutes
+      POSTGRES_PASSWORD: minutes
+      POSTGRES_DB: minutes
+    ports:
+      - "127.0.0.1:5433:5432"
+    shm_size: 1g
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U minutes -d minutes"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+  otel:
+    image: otel/opentelemetry-collector-contrib:0.130.0
+    command: ["--config=/etc/otelcol/config.yaml"]
+    ports:
+      - "127.0.0.1:4318:4318"
+    volumes:
+      - ./config/otel-collector.yaml:/etc/otelcol/config.yaml:ro
+      - ./data/otel:/data
+  qdrant:
+    image: qdrant/qdrant:v1.19.1
+    profiles: ["bench"]
+    ports:
+      - "127.0.0.1:6333:6333"
+    volumes:
+      - qdrant:/qdrant/storage
+volumes:
+  pgdata:
+  qdrant:
