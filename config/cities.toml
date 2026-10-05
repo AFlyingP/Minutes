@@ -1,0 +1,21 @@
+date_from = "2023-01-01"
+date_to = "2025-12-31"
+
+[cities.seattle]
+name = "Seattle"
+state = "WA"
+source = "legistar"
+item_format = "legistar"
+bodies = ["City Council", "Land Use Committee"]
+legistar_client = "seattle"
+sample_seed = 1101
+
+[cities.lincoln]
+name = "Lincoln"
+state = "CA"
+source = "granicus"
+item_format = "granicus"
+bodies = ["City Council", "Planning Commission"]
+granicus_host = "lincoln.granicus.com"
+granicus_view_id = 1
+sample_seed = 1102
