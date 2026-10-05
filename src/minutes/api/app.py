@@ -6,7 +6,7 @@ from fastapi import FastAPI, Request, Response
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, JSONResponse
 
-from minutes.api import routes_core, routes_labels
+from minutes.api import routes_core, routes_docs, routes_labels
 from minutes.config import ROOT
 from minutes.errors import (
     DatabaseError,
@@ -45,6 +45,7 @@ log = get_logger("api")
 def create_app() -> FastAPI:
     app = FastAPI(title="Minutes")
     app.include_router(routes_core.router)
+    app.include_router(routes_docs.router)
     app.include_router(routes_labels.router)
 
     @app.middleware("http")

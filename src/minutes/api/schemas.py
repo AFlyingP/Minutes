@@ -3,9 +3,11 @@ from typing import Literal
 
 from pydantic import BaseModel
 
+from minutes.ingest.layout import Box
 from minutes.labels.schema import Label, LabelType
 
 DocKind = Literal["agenda", "minutes", "transcript"]
+UnitKind = Literal["page", "segment"]
 SearchMode = Literal["keyword", "vector", "hybrid", "hybrid_rerank"]
 Chunker = Literal["fixed", "item"]
 Pipeline = Literal["final", "baseline", "langgraph"]
@@ -110,6 +112,68 @@ class AskOut(BaseModel):
     latency_ms: int
     cached: bool
     dropped_sentences: int
+
+
+class DocumentSummaryOut(BaseModel):
+    id: str
+    meeting_id: str
+    city_id: str
+    kind: DocKind
+    body: str
+    meeting_date: date
+    unit_kind: UnitKind
+    unit_count: int | None
+
+
+class DocumentsOut(BaseModel):
+    total: int
+    documents: list[DocumentSummaryOut]
+
+
+class MeetingSummaryOut(BaseModel):
+    id: str
+    body: str
+    meeting_date: date
+    title: str
+    recording_url: str | None
+
+
+class DocumentOut(BaseModel):
+    id: str
+    city_id: str
+    kind: DocKind
+    unit_kind: UnitKind
+    unit_count: int | None
+    source_url: str
+    meeting: MeetingSummaryOut
+
+
+class UnitOut(BaseModel):
+    document_id: str
+    unit_index: int
+    unit_kind: UnitKind
+    text: str
+    boxes: list[Box] | None
+    text_source: Literal["pdf", "ocr", "caption"]
+    start_ms: int | None
+    end_ms: int | None
+    speaker: str | None
+    width_pt: float | None
+    height_pt: float | None
+    label: str
+    recording_link: str | None
+
+
+class MeetingDocumentOut(BaseModel):
+    id: str
+    kind: DocKind
+    status: str
+    unit_count: int | None
+
+
+class MeetingOut(MeetingSummaryOut):
+    city_id: str
+    documents: list[MeetingDocumentOut]
 
 
 class LabelsOut(BaseModel):
