@@ -26,6 +26,9 @@ dependencies = [
   "jsonschema==4.26.0",
 ]
 
+[project.scripts]
+minutes = "minutes.cli:app"
+
 [dependency-groups]
 dev = [
   "ruff==0.16.10",
