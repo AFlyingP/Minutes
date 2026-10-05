@@ -3,6 +3,7 @@ import { createRoot } from "react-dom/client";
 import { createBrowserRouter, RouterProvider } from "react-router-dom";
 
 import App, { Placeholder } from "./App";
+import DocPage from "./pages/DocPage";
 import SearchPage from "./pages/SearchPage";
 import "./styles.css";
 
@@ -16,7 +17,7 @@ const router = createBrowserRouter([
       { path: "ask", element: <Placeholder /> },
       { path: "agent", element: <Placeholder /> },
       { path: "label", element: <Placeholder /> },
-      { path: "doc/:id", element: <Placeholder /> },
+      { path: "doc/:id", element: <DocPage /> },
     ],
   },
 ]);
