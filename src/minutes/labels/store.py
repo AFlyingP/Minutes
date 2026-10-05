@@ -306,8 +306,9 @@ def create(
     label: LabelIn,
     *,
     now: Callable[[], datetime] = lambda: datetime.now(UTC),
+    labels_dir: Path = Path("eval/labels"),
 ) -> Label:
-    require_unfrozen()
+    require_unfrozen(labels_dir)
     _validate(conn, label)
     prefix, width = _PREFIXES[label.type]
     stem = f"{prefix}-{label.city}-"
@@ -325,8 +326,14 @@ def create(
     return get(conn, label_id)
 
 
-def update(conn: psycopg.Connection[TupleRow], label_id: str, label: LabelIn) -> Label:
-    require_unfrozen()
+def update(
+    conn: psycopg.Connection[TupleRow],
+    label_id: str,
+    label: LabelIn,
+    *,
+    labels_dir: Path = Path("eval/labels"),
+) -> Label:
+    require_unfrozen(labels_dir)
     existing = get(conn, label_id)
     _validate(conn, label, label_id)
     if label.type != existing.type or label.city != existing.city:
@@ -338,8 +345,13 @@ def update(conn: psycopg.Connection[TupleRow], label_id: str, label: LabelIn) ->
     return get(conn, label_id)
 
 
-def delete(conn: psycopg.Connection[TupleRow], label_id: str) -> None:
-    require_unfrozen()
+def delete(
+    conn: psycopg.Connection[TupleRow],
+    label_id: str,
+    *,
+    labels_dir: Path = Path("eval/labels"),
+) -> None:
+    require_unfrozen(labels_dir)
     if not conn.execute("DELETE FROM labels WHERE id = %s RETURNING id", (label_id,)).fetchone():
         raise NotFoundError(f"unknown label {label_id}")
 
@@ -362,8 +374,14 @@ def list_labels(
     return [_label(row) for row in rows]
 
 
-def set_reviewed(conn: psycopg.Connection[TupleRow], label_id: str, reviewed: bool) -> Label:
-    require_unfrozen()
+def set_reviewed(
+    conn: psycopg.Connection[TupleRow],
+    label_id: str,
+    reviewed: bool,
+    *,
+    labels_dir: Path = Path("eval/labels"),
+) -> Label:
+    require_unfrozen(labels_dir)
     if not conn.execute(
         "UPDATE labels SET human_reviewed = %s WHERE id = %s RETURNING id", (reviewed, label_id)
     ).fetchone():
