@@ -6,7 +6,7 @@ import httpx
 import pytest
 from typer.testing import CliRunner
 
-from minutes import probe
+from minutes import config, probe
 from minutes.cli import app
 from minutes.config import get_settings
 
@@ -95,6 +95,26 @@ def test_probe_never_raises_and_hides_key(monkeypatch: pytest.MonkeyPatch) -> No
         assert result.ok is False
         assert KEY not in result.detail
         assert "***" in result.detail
+
+
+def test_probe_reports_bad_settings_and_config_files(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setattr(config, "CONFIG_DIR", tmp_path)
+    assert [(r.name, r.ok) for r in probe.probe_sources()] == [("config", False)]
+    monkeypatch.setenv("MINUTES_LLM_BASE_URL", "http://127.0.0.1:9/v1")
+    monkeypatch.setenv("MINUTES_LLM_API_KEY", KEY)
+    get_settings.cache_clear()
+    missing = probe.probe_llm()
+    assert [(r.name, r.ok) for r in missing] == [("config", False)]
+    assert "models.toml" in missing[0].detail
+
+    monkeypatch.setenv("MINUTES_CORPUS", "everything")
+    get_settings.cache_clear()
+    for results in (probe.probe_llm(), probe.probe_gpu()):
+        assert len(results) == 1
+        assert results[0].ok is False
+        assert results[0].detail.startswith("ConfigError: invalid config: MINUTES_CORPUS")
 
 
 def test_probe_command_prints_failure_and_exits_1() -> None:

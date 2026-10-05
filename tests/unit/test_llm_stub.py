@@ -100,7 +100,8 @@ def test_extract_amount_and_motion() -> None:
 
 
 def test_extract_ordinance_once_per_identifier() -> None:
-    ordinances = [r["ordinance"] for r in extract(BIRCH_9B) if r["kind"] == "ordinance"]
+    text = BIRCH_9B + "\nRESOLUTION 2024-07 was adopted."
+    ordinances = [r["ordinance"] for r in extract(text) if r["kind"] == "ordinance"]
     assert ordinances == [
         {
             "identifier": "RESOLUTION 2024-07",

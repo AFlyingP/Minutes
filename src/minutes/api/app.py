@@ -64,7 +64,9 @@ def create_app() -> FastAPI:
 
     @app.exception_handler(MinutesError)
     async def known_error(request: Request, err: MinutesError) -> JSONResponse:
-        status, code, with_detail = ERROR_RESPONSES.get(type(err), (500, "internal_error", False))
+        if type(err) not in ERROR_RESPONSES:
+            return await unknown_error(request, err)
+        status, code, with_detail = ERROR_RESPONSES[type(err)]
         body = {"error": code, "detail": str(err)} if with_detail else {"error": code}
         return JSONResponse(body, status_code=status)
 
@@ -76,7 +78,7 @@ def create_app() -> FastAPI:
 
     @app.exception_handler(Exception)
     async def unknown_error(request: Request, err: Exception) -> JSONResponse:
-        # this handler runs outside the middleware, so it sets the header itself
+        # for an unexpected exception this runs outside the middleware, so it sets the header
         cid = getattr(request.state, "correlation_id", "-")
         log.error("request failed", exc_info=err, extra={"event": "request_failed"})
         return JSONResponse(

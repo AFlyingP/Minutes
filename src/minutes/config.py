@@ -87,7 +87,7 @@ class Price:
 
 
 def _inside(path: Path, parent: Path) -> bool:
-    return (Path.cwd() / path).resolve().is_relative_to((Path.cwd() / parent).resolve())
+    return (ROOT / path).resolve().is_relative_to((ROOT / parent).resolve())
 
 
 def _problems(s: Settings) -> Iterator[tuple[str, str]]:
@@ -145,15 +145,15 @@ def corpus_database_url(corpus: Corpus) -> str:
 
 @contextmanager
 def _reading(path: Path) -> Iterator[dict[str, Any]]:
+    parse = json.loads if path.suffix == ".json" else tomllib.loads
     try:
-        yield tomllib.loads(path.read_text(encoding="utf-8"))
+        yield parse(path.read_text(encoding="utf-8"))
     except FileNotFoundError as err:
         raise ConfigError(f"config file missing: {path.name}") from err
-    except tomllib.TOMLDecodeError as err:
-        raise ConfigError(f"invalid config: {path.name}: {err}") from err
     except KeyError as err:
         raise ConfigError(f"invalid config: {path.name}: missing key {err}") from err
-    except (TypeError, pydantic.ValidationError) as err:
+    except (TypeError, ValueError) as err:
+        # both decoders and pydantic raise subclasses of ValueError
         raise ConfigError(f"invalid config: {path.name}: {err}") from err
 
 
@@ -162,12 +162,12 @@ def load_cities(corpus: Corpus | None = None) -> dict[str, CityConfig]:
     if (corpus or get_settings().corpus) == "fixture":
         if not FIXTURE_MANIFEST.exists():
             raise ConfigError("fixture manifest missing")
-        cities = json.loads(FIXTURE_MANIFEST.read_text(encoding="utf-8"))["cities"]
         date_from, date_to = "2024-01-01", "2024-12-31"
-        return {
-            key: CityConfig(**table, date_from=date_from, date_to=date_to)
-            for key, table in cities.items()
-        }
+        with _reading(FIXTURE_MANIFEST) as data:
+            return {
+                key: CityConfig(**table, date_from=date_from, date_to=date_to)
+                for key, table in data["cities"].items()
+            }
     with _reading(CONFIG_DIR / "cities.toml") as data:
         date_from, date_to = data["date_from"], data["date_to"]
         return {

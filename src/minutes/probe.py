@@ -14,6 +14,7 @@ from urllib.parse import urljoin, urlsplit
 import httpx
 
 from minutes.config import CityConfig, get_settings, load_cities, load_models
+from minutes.errors import ConfigError
 
 # city hosts get at most 2 requests per second
 REQUEST_GAP = 0.5
@@ -50,9 +51,17 @@ class Listing:
     count: int
 
 
+def _api_key() -> str:
+    # a failure caused by bad settings still has to be reported
+    try:
+        return get_settings().llm_api_key
+    except ConfigError:
+        return ""
+
+
 def _failure(name: str, err: Exception) -> ProbeResult:
     detail = f"{type(err).__name__}: {err}"
-    key = get_settings().llm_api_key
+    key = _api_key()
     if key:
         detail = detail.replace(key, "***")
     return ProbeResult(name, False, detail[:200])
@@ -64,6 +73,14 @@ def _check(name: str, step: Callable[..., str], *args: Any) -> ProbeResult:
         return ProbeResult(name, True, step(*args))
     except Exception as err:
         return _failure(name, err)
+
+
+def _guarded(name: str, results: Callable[[], list[ProbeResult]]) -> list[ProbeResult]:
+    # covers what runs outside a single check: settings, config files, imports
+    try:
+        return results()
+    except Exception as err:
+        return [_failure(name, err)]
 
 
 def _chat(client: httpx.Client, model: str, prompt: str, schema: dict[str, Any] | None) -> str:
@@ -98,6 +115,10 @@ def _schema_chat(client: httpx.Client, model: str) -> str:
 
 
 def probe_llm(transport: httpx.BaseTransport | None = None) -> list[ProbeResult]:
+    return _guarded("config", lambda: _llm(transport))
+
+
+def _llm(transport: httpx.BaseTransport | None) -> list[ProbeResult]:
     settings = get_settings()
     if not settings.llm_base_url or not settings.llm_api_key:
         detail = "MINUTES_LLM_BASE_URL and MINUTES_LLM_API_KEY are required"
@@ -254,6 +275,10 @@ def _probe_city(client: httpx.Client, city_id: str, city: CityConfig) -> list[Pr
 
 
 def probe_sources(transport: httpx.BaseTransport | None = None) -> list[ProbeResult]:
+    return _guarded("config", lambda: _sources(transport))
+
+
+def _sources(transport: httpx.BaseTransport | None) -> list[ProbeResult]:
     results = []
     with httpx.Client(
         timeout=httpx.Timeout(60, connect=10), max_redirects=5, transport=transport
@@ -264,16 +289,17 @@ def probe_sources(transport: httpx.BaseTransport | None = None) -> list[ProbeRes
 
 
 def probe_gpu() -> list[ProbeResult]:
+    return _guarded("cuda", _gpu)
+
+
+def _gpu() -> list[ProbeResult]:
     models_dir = get_settings().data_dir / "models"
     os.environ["HF_HOME"] = str(models_dir / "hf")
     os.environ["DOCTR_CACHE_DIR"] = str(models_dir / "doctr")
-    try:
-        import numpy as np
-        import torch
-        from doctr.models import ocr_predictor
-        from sentence_transformers import CrossEncoder, SentenceTransformer
-    except ImportError as err:
-        return [_failure("cuda", err)]
+    import numpy as np
+    import torch
+    from doctr.models import ocr_predictor
+    from sentence_transformers import CrossEncoder, SentenceTransformer
 
     loaded: list[Any] = []
 

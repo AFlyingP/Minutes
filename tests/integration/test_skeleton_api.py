@@ -6,8 +6,12 @@ from fastapi.testclient import TestClient
 from psycopg.rows import TupleRow
 from typer.testing import CliRunner
 
+from minutes.api import routes_core
 from minutes.api.app import create_app
 from minutes.cli import app
+from minutes.errors import CorpusError, LLMTransportError, StageError, ValidationError
+from minutes.extract import extractor
+from minutes.retrieval.search import Filters, search
 
 pytestmark = pytest.mark.integration
 
@@ -58,6 +62,42 @@ def test_search_rejects_empty_query_and_unknown_city(client: TestClient) -> None
         assert response.json()["error"] == "validation_error"
     assert unknown.json()["detail"] == "city: unknown city cedar"
     assert bad_date.json()["detail"].startswith("query.date_from: ")
+
+
+def test_search_length_limit_applies_to_the_trimmed_query(
+    conn: psycopg.Connection[TupleRow], fixture_corpus: str
+) -> None:
+    padded = " " + "sidewalk " * 54 + "repair" + " " * 20
+    assert len(padded) > 500
+    search(conn, padded, Filters(), mode="keyword", chunker="fixed", k=5)
+    with pytest.raises(ValidationError, match="q: must be 1 to 500 characters"):
+        search(conn, "x" * 501, Filters(), mode="keyword", chunker="fixed", k=5)
+
+
+def test_known_error_without_a_status_is_an_internal_error(
+    fixture_corpus: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def fail(*args: object, **kwargs: object) -> None:
+        raise CorpusError("subset rules not met")
+
+    monkeypatch.setattr(routes_core, "search", fail)
+    client = TestClient(create_app(), raise_server_exceptions=False)
+    response = client.get("/api/search", params={"q": "sidewalk"})
+    assert response.status_code == 500
+    cid = response.headers["X-Correlation-ID"]
+    assert response.json() == {"error": "internal_error", "correlation_id": cid}
+
+
+def test_extract_turns_a_client_failure_into_a_stage_error(
+    conn: psycopg.Connection[TupleRow], fixture_corpus: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    class Unreachable:
+        def chat(self, **kwargs: object) -> None:
+            raise LLMTransportError("timeout")
+
+    monkeypatch.setattr(extractor, "get_client", Unreachable)
+    with pytest.raises(StageError, match="extract failed: timeout"):
+        extractor.run(conn, "birch-minutes-201")
 
 
 def test_response_has_correlation_id_header(client: TestClient) -> None:

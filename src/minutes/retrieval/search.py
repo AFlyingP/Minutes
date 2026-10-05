@@ -97,7 +97,8 @@ def search(
     k: int,
 ) -> list[Hit]:
     """Ranked hits for a query; each hit carries the text spans a citation can point at."""
-    if not query.strip() or len(query) > 500:
+    query = query.strip()
+    if not 1 <= len(query) <= 500:
         raise ValidationError("q: must be 1 to 500 characters")
     if not 1 <= k <= 50:
         raise ValidationError("k: must be between 1 and 50")

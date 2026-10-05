@@ -74,6 +74,19 @@ def test_rollback_then_migrate_restores_schema(scratch_url: str) -> None:
     assert db.migrate(scratch_url) == ["0001"]
 
 
+def test_rollback_without_a_down_file_is_a_migration_error(
+    scratch_url: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(db, "MIGRATIONS_DIR", tmp_path)
+    with pytest.raises(MigrationError, match="no down file for 0001"):
+        db.rollback(scratch_url)
+
+
+def test_lost_connection_is_a_database_error(scratch_url: str) -> None:
+    with pytest.raises(DatabaseError, match="database unavailable"), db.connect(scratch_url):
+        raise psycopg.OperationalError("server closed the connection")
+
+
 def test_vector_extension_and_hnsw_index_exist(conn: psycopg.Connection[TupleRow]) -> None:
     extension = conn.execute("SELECT 1 FROM pg_extension WHERE extname = 'vector'").fetchone()
     index = conn.execute(

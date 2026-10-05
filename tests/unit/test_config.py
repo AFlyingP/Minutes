@@ -40,6 +40,11 @@ def test_live_mode_requires_url_and_key(monkeypatch: pytest.MonkeyPatch) -> None
     with pytest.raises(ConfigError) as raised:
         get_settings()
     assert str(raised.value).startswith("invalid config: MINUTES_LLM_BASE_URL")
+    monkeypatch.setenv("MINUTES_LLM_BASE_URL", "http://127.0.0.1:9/v1")
+    get_settings.cache_clear()
+    with pytest.raises(ConfigError) as raised:
+        get_settings()
+    assert str(raised.value).startswith("invalid config: MINUTES_LLM_API_KEY")
 
 
 def test_fault_rejected_outside_fixture(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -89,6 +94,23 @@ def test_fixture_cities_need_the_manifest(monkeypatch: pytest.MonkeyPatch, tmp_p
     monkeypatch.setattr(config, "FIXTURE_MANIFEST", tmp_path / "manifest.json")
     with pytest.raises(ConfigError, match="fixture manifest missing"):
         load_cities()
+
+
+@pytest.mark.parametrize("content", ["{not json", "{}", '{"cities": {"alder": {"name": 3}}}'])
+def test_broken_fixture_manifest_is_a_config_error(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, content: str
+) -> None:
+    (tmp_path / "manifest.json").write_text(content)
+    monkeypatch.setattr(config, "FIXTURE_MANIFEST", tmp_path / "manifest.json")
+    with pytest.raises(ConfigError, match=r"invalid config: manifest\.json"):
+        load_cities()
+
+
+def test_data_dir_is_checked_against_the_repository_not_the_working_directory(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("MINUTES_DATA_DIR", str(config.ROOT / "data"))
+    assert get_settings().data_dir == config.ROOT / "data"
 
 
 def test_missing_key_in_config_file_is_a_config_error(

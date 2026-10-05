@@ -2,6 +2,7 @@ import psycopg
 from psycopg.rows import TupleRow
 from psycopg.types.json import Jsonb
 
+from minutes.errors import LLMOutputError, LLMTransportError, StageError
 from minutes.extract.schema import EXTRACTION_SCHEMA, FACT_MODELS
 from minutes.llm import get_client
 from minutes.llm.prompts import EXTRACT_SYSTEM, ItemText, extract_user
@@ -51,15 +52,18 @@ def run(conn: psycopg.Connection[TupleRow], document_id: str) -> dict[str, objec
     if not items:
         return {"facts": 0, "rejected": 0}
     user = extract_user(city_name, body, meeting_date.isoformat(), kind, items)
-    result = get_client().chat(
-        purpose="extract",
-        messages=[
-            {"role": "system", "content": EXTRACT_SYSTEM},
-            {"role": "user", "content": user},
-        ],
-        schema=EXTRACTION_SCHEMA,
-        schema_name="extraction",
-    )
+    try:
+        result = get_client().chat(
+            purpose="extract",
+            messages=[
+                {"role": "system", "content": EXTRACT_SYSTEM},
+                {"role": "user", "content": user},
+            ],
+            schema=EXTRACTION_SCHEMA,
+            schema_name="extraction",
+        )
+    except (LLMOutputError, LLMTransportError) as err:
+        raise StageError(f"extract failed: {err}") from err
     assert result.parsed is not None
     by_number = {item.number: item for item in items}
     records = result.parsed["records"]

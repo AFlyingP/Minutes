@@ -129,3 +129,12 @@ test("shows the loading state while the request is pending", async () => {
   await screen.findByRole("option", { name: "Alder" });
   expect(screen.getByTestId("loading")).toBeInTheDocument();
 });
+
+test("treats an empty q in the address as no search", async () => {
+  const fetchMock = mockFetch(() => Promise.resolve(json({ hits: [] })));
+  renderPage("/?q=");
+  expect(screen.getByText("Enter a search to begin.")).toBeInTheDocument();
+  expect(screen.queryByTestId("loading")).not.toBeInTheDocument();
+  await screen.findByRole("option", { name: "Alder" });
+  expect(fetchMock).toHaveBeenCalledTimes(1);
+});

@@ -39,7 +39,7 @@ def connect(url: str) -> Iterator[psycopg.Connection[TupleRow]]:
     try:
         with get_pool(url).connection() as conn:
             yield conn
-    except PoolTimeout as err:
+    except (PoolTimeout, psycopg.OperationalError) as err:
         raise DatabaseError("database unavailable") from err
 
 
@@ -83,7 +83,9 @@ def rollback(url: str, steps: int = 1) -> list[str]:
             "SELECT version FROM schema_migrations ORDER BY version DESC LIMIT %s", (steps,)
         ).fetchall()
         for (version,) in rows:
-            path = next(MIGRATIONS_DIR.glob(f"{version}_*.down.sql"))
+            path = next(MIGRATIONS_DIR.glob(f"{version}_*.down.sql"), None)
+            if path is None:
+                raise MigrationError(f"no down file for {version}")
             try:
                 with conn.transaction():
                     conn.execute(path.read_bytes())

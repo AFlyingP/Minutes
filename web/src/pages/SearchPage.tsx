@@ -34,7 +34,7 @@ export default function SearchPage() {
   const [outcome, setOutcome] = useState<Outcome>();
 
   const key = params.toString();
-  const searched = params.has("q");
+  const searched = Boolean(params.get("q"));
 
   useEffect(() => {
     fetchCities().then(setCities, (err) => setCitiesError(errorCode(err)));

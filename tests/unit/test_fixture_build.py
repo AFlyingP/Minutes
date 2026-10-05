@@ -14,11 +14,14 @@ def test_build_is_deterministic(tmp_path: Path) -> None:
     first, second = tmp_path / "first", tmp_path / "second"
     assert build(first) == 0
     assert build(second) == 0
+    files = sorted(path.relative_to(first) for path in first.rglob("*") if path.is_file())
+    assert len(files) == 14
+    for file in files:
+        assert (first / file).read_bytes() == (second / file).read_bytes(), file
     captions = [doc for doc in MANIFEST["documents"] if doc["kind"] == "transcript"]
     assert len(captions) == 4
     for doc in captions:
         data = (first / doc["file"]).read_bytes()
-        assert data == (second / doc["file"]).read_bytes()
         assert hashlib.sha256(data).hexdigest() == doc["sha256"]
 
 
