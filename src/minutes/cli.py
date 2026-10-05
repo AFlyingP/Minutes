@@ -13,7 +13,7 @@ from minutes.api.app import create_app
 from minutes.api.schemas import Chunker, Pipeline, SearchMode
 from minutes.config import Corpus, corpus_database_url, get_settings
 from minutes.errors import ConfigError, GateStaleError, LabelRuleError, LLMQuotaError, MinutesError
-from minutes.ingest import pipeline
+from minutes.ingest import pipeline, quality
 from minutes.log import bind_correlation_id, configure_logging, get_logger, new_correlation_id
 from minutes.retrieval.search import Filters, city_names, hit_heading, search, span_label
 
@@ -84,6 +84,12 @@ def probe_sources() -> None:
 def probe_gpu() -> None:
     """Check that the embedder, reranker, and OCR models load on the GPU."""
     report(probe.probe_gpu())
+
+
+@probe_app.command("ocr")
+def probe_ocr() -> None:
+    """Measure GPU OCR character error rate on the scanned fixture page."""
+    report(probe.probe_ocr())
 
 
 def use_corpus(corpus: str | None) -> Corpus:
@@ -246,6 +252,24 @@ def corpus_make_dev_subset(seed: Annotated[int, typer.Option("--seed")] = 7) -> 
     with db.connect(get_settings().database_url) as conn:
         documents = corpus.make_dev_subset(conn, seed)
     typer.echo(f"wrote {len(documents)} documents")
+
+
+@corpus_app.command("parse-quality")
+def corpus_parse_quality(corpus: CorpusOption = None) -> None:
+    """Print page quality and OCR counts for each city."""
+    with db.connect(corpus_database_url(use_corpus(corpus))) as conn:
+        rows = quality.parse_quality_report(conn)
+    for row in rows:
+        confidence = (
+            f"{row.mean_ocr_confidence:.3f}" if row.mean_ocr_confidence is not None else "n/a"
+        )
+        score = f"{row.parse_quality:.3f}" if row.parse_quality is not None else "n/a"
+        typer.echo(
+            f"{row.city_id} pages={row.pages} ocr_pages={row.ocr_pages} "
+            f"empty_pages={row.empty_pages} mean_ocr_confidence={confidence} parse_quality={score}"
+        )
+    if any(row.parse_quality is None or row.parse_quality < 0.90 for row in rows):
+        raise typer.Exit(1)
 
 
 CityOption = Annotated[str | None, typer.Option()]

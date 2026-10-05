@@ -1,5 +1,6 @@
 """Checks that the outside pieces work on this machine: model endpoint, city sites, GPU."""
 
+import io
 import json
 import os
 import re
@@ -10,9 +11,15 @@ from itertools import islice
 from typing import Any
 
 import httpx
+import pdfplumber
+from PIL import Image
 
-from minutes.config import CityConfig, get_settings, load_cities, load_models
+from minutes.config import FIXTURE_MANIFEST, CityConfig, get_settings, load_cities, load_models
 from minutes.errors import ConfigError
+from minutes.ingest import parse
+from minutes.ingest.layout import Word, build_text
+from minutes.ingest.ocr import DoctrEngine
+from minutes.ingest.quality import levenshtein
 from minutes.sources import get_source
 from minutes.sources.base import DocRef, Source
 
@@ -185,6 +192,29 @@ def _sources(transport: httpx.BaseTransport | None) -> list[ProbeResult]:
 
 def probe_gpu() -> list[ProbeResult]:
     return _guarded("cuda", _gpu)
+
+
+def probe_ocr() -> list[ProbeResult]:
+    return _guarded("ocr_cer", _ocr)
+
+
+def _ocr() -> list[ProbeResult]:
+    corpus_dir = FIXTURE_MANIFEST.parent
+    content = json.loads((corpus_dir / "content.json").read_text(encoding="utf-8"))
+    document = next(doc for doc in content["documents"] if doc["id"] == "birch-minutes-201")
+    reference = " ".join("\n".join(document["pages"][2]["lines"]).split())
+    file_path = str(corpus_dir / "birch-minutes-201.pdf")
+    with pdfplumber.open(file_path) as pdf:
+        width, height = pdf.pages[2].width, pdf.pages[2].height
+    with Image.open(io.BytesIO(parse.render_page_png(file_path, 2, 200))) as image:
+        ocr_words = DoctrEngine().read(image, "birch-minutes-201-3")
+    words = [
+        Word(word.text, word.x0 * width, word.y0 * height, word.x1 * width, word.y1 * height)
+        for word in ocr_words
+    ]
+    text, _ = build_text(words, [], width, height)
+    cer = levenshtein(" ".join(text.split()), reference) / len(reference)
+    return [ProbeResult(f"ocr_cer={cer:.3f}", cer <= 0.05, "" if cer <= 0.05 else "above 0.05")]
 
 
 def _gpu() -> list[ProbeResult]:
