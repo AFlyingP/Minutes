@@ -1,0 +1,11 @@
+{
+  "frozen": true,
+  "frozen_utc": "2026-10-05T23:42:04Z",
+  "files": {
+    "questions.jsonl": "0006a3e6e2245e005598416a269c120ca8dd7e7762be0f6672da0710eee81175",
+    "agenda_counts.jsonl": "086612e8e2a392f662469a6b021a9c5e06ea819319f6d4fbff7c262cf8e75faa",
+    "extraction.jsonl": "e4f65bb3ea5fca81664246c5ad8cb4166d46e3d6a084041b99753f19e69938fc",
+    "agent_tasks.jsonl": "b8c51234591405126aa87e9b45f567c4653920870707bdac7ec7f1053bb79a52"
+  },
+  "amendments": []
+}
