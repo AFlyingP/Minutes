@@ -81,6 +81,11 @@ def run(
                 raise
             except PermanentStageError as err:
                 with conn.transaction():
+                    conn.execute(
+                        "UPDATE documents SET status = 'failed', fail_reason = %s, "
+                        "updated_at = now() WHERE id = %s",
+                        (str(err), job.document_id),
+                    )
                     queue.fail(conn, job.id, str(err), permanent=True)
                 log.error(
                     "job failed",

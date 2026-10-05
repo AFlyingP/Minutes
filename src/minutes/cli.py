@@ -7,7 +7,7 @@ import typer
 import uvicorn
 from typer.core import TyperGroup
 
-from minutes import db, probe, queue, worker
+from minutes import corpus, db, probe, queue, worker
 from minutes.answer.pipeline import answer
 from minutes.api.app import create_app
 from minutes.api.schemas import Chunker, Pipeline, SearchMode
@@ -43,10 +43,12 @@ ingest_app = typer.Typer(no_args_is_help=True)
 worker_app = typer.Typer(no_args_is_help=True)
 jobs_app = typer.Typer(no_args_is_help=True)
 fixtures_app = typer.Typer(no_args_is_help=True)
+corpus_app = typer.Typer(no_args_is_help=True)
 app.add_typer(ingest_app, name="ingest")
 app.add_typer(worker_app, name="worker")
 app.add_typer(jobs_app, name="jobs")
 app.add_typer(fixtures_app, name="fixtures")
+app.add_typer(corpus_app, name="corpus")
 
 
 @app.callback()
@@ -236,6 +238,14 @@ def fixtures_load() -> None:
     get_settings.cache_clear()
     count = pipeline.load_fixture_corpus(get_settings().test_database_url)
     typer.echo(f"loaded {count} documents")
+
+
+@corpus_app.command("make-dev-subset")
+def corpus_make_dev_subset(seed: Annotated[int, typer.Option("--seed")] = 7) -> None:
+    """Write the fixed development document list."""
+    with db.connect(get_settings().database_url) as conn:
+        documents = corpus.make_dev_subset(conn, seed)
+    typer.echo(f"wrote {len(documents)} documents")
 
 
 CityOption = Annotated[str | None, typer.Option()]

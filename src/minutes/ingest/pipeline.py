@@ -13,16 +13,14 @@ from minutes import db
 from minutes.config import CONFIG_DIR, Corpus, get_settings, load_cities
 from minutes.errors import NotFoundError, StageError
 from minutes.extract import extractor
-from minutes.ingest import chunk, embed, parse, segment
+from minutes.ingest import chunk, download, embed, parse, segment
 from minutes.sources import get_source
-from minutes.sources.base import DocRef
 
 Connection = psycopg.Connection[TupleRow]
 
 STAGES: tuple[str, ...] = ("download", "parse", "ocr", "segment", "chunk", "embed", "extract")
 STAGE_VERSIONS: dict[str, int] = {stage: 1 for stage in STAGES}
 LABEL_GATED_STAGES = ("segment", "chunk", "embed", "extract")
-EXTENSIONS = {"application/pdf": "pdf", "application/x-subrip": "srt", "text/vtt": "vtt"}
 
 
 @dataclass(frozen=True)
@@ -47,47 +45,12 @@ def should_run(conn: Connection, document_id: str, stage: str, input_hash: str) 
     return row is None
 
 
-def _download(conn: Connection, document_id: str) -> dict[str, object]:
-    row = conn.execute(
-        "SELECT meeting_id, city_id, kind, source_url, media_type FROM documents WHERE id = %s",
-        (document_id,),
-    ).fetchone()
-    if row is None:
-        raise NotFoundError(f"unknown document {document_id}")
-    meeting_id, city_id, kind, source_url, media_type = row
-    settings = get_settings()
-    source = get_source(city_id, load_cities()[city_id])
-    data = source.fetch(DocRef(document_id, meeting_id, city_id, kind, source_url, media_type))
-    digest = hashlib.sha256(data).hexdigest()
-    original = conn.execute(
-        "SELECT id FROM documents WHERE city_id = %s AND content_sha256 = %s "
-        "AND status = 'downloaded' AND id <> %s",
-        (city_id, digest, document_id),
-    ).fetchone()
-    if original is not None:
-        conn.execute(
-            "UPDATE documents SET status = 'duplicate', duplicate_of = %s, updated_at = now() "
-            "WHERE id = %s",
-            (original[0], document_id),
-        )
-        return {"status": "duplicate", "bytes": len(data)}
-    path = settings.data_dir / "raw" / city_id / f"{document_id}.{EXTENSIONS[media_type]}"
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_bytes(data)
-    conn.execute(
-        "UPDATE documents SET status = 'downloaded', content_sha256 = %s, byte_size = %s, "
-        "file_path = %s, updated_at = now() WHERE id = %s",
-        (digest, len(data), path.as_posix(), document_id),
-    )
-    return {"status": "downloaded", "bytes": len(data)}
-
-
 def _ocr(conn: Connection, document_id: str) -> dict[str, object]:
     return {"ocr_pages": 0}
 
 
 STAGE_FUNCTIONS: dict[str, Callable[[Connection, str], dict[str, object]]] = {
-    "download": _download,
+    "download": download.run,
     "parse": parse.run,
     "ocr": _ocr,
     "segment": segment.run,
@@ -159,9 +122,9 @@ def discover(conn: Connection, corpus: Corpus, city: str | None) -> int:
             (city_id, config.name, config.state, config.item_format),
         )
         source = get_source(city_id, config)
-        listed = source.list_meetings(
-            date.fromisoformat(config.date_from), date.fromisoformat(config.date_to)
-        )
+        date_from = date.fromisoformat(config.date_from)
+        date_to = date.fromisoformat(config.date_to)
+        listed = source.list_meetings(date_from, date_to)
         for meeting, documents in listed:
             conn.execute(
                 "INSERT INTO meetings (id, city_id, body, meeting_date, title, source_key, "
