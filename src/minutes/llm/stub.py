@@ -7,29 +7,10 @@ from typing import Any
 
 from minutes.config import get_settings
 from minutes.errors import ConfigError, LLMQuotaError
+from minutes.extract.verify import MEMBER_VALUES, TABLE_LINE, labelled, names, quoted_counts
 from minutes.llm import Budget, ChatResult
 
 VOTE_LABELS = ("In Favor:", "Opposed:", "Ayes:", "Noes:", "Nays:", "Abstain:", "Absent:")
-CATEGORY_LABELS = {
-    "ayes": "In Favor|Ayes|Aye|Yeas|Yes",
-    "noes": "Opposed|Noes|Nays|No",
-    "abstain": "Abstain|Abstained|Abstentions|Abstaining",
-    "absent": "Absent|Excused",
-}
-CATEGORY_WORDS = {
-    "ayes": "Aye|Yes|Yea",
-    "noes": "No|Nay",
-    "abstain": "Abstain|Abstained",
-    "absent": "Absent|Excused",
-}
-MEMBER_VALUES = {"ayes": "aye", "noes": "no", "abstain": "abstain", "absent": "absent"}
-LABEL = re.compile(
-    r"\b(?:" + "|".join(f"(?P<{c}>{labels})" for c, labels in CATEGORY_LABELS.items()) + r"):"
-)
-TABLE_LINE = re.compile(
-    r"\|\s*(?:" + "|".join(f"(?P<{c}>{words})" for c, words in CATEGORY_WORDS.items()) + r")\s*$",
-    re.I,
-)
 SOURCE = re.compile(r"^\[(\d+)\] [^\n]*\n(.*?)(?=\n\n\[\d+\] |\Z)", re.M | re.S)
 ITEM = re.compile(r"^### ITEM (\d+): (\S*) ?([^\n]*)\n(.*?)(?=\n\n### ITEM \d+: |\Z)", re.M | re.S)
 SUBJECT = re.compile(r"RESOLUTION \d{4}-\d+|ORDINANCE \d+[A-Z]?|(?:CB|Res|CF|Appt|Min|IRC|Inf) \d+")
@@ -49,36 +30,6 @@ _quota_fault = ""
 _quota_calls = 0
 
 
-def _labelled(text: str) -> list[tuple[str, str]]:
-    """(category, text up to the next label) for each vote label in the text."""
-    matches = list(LABEL.finditer(text))
-    starts = [m.start() for m in matches[1:]]
-    return [
-        (str(m.lastgroup), text[m.end() : end])
-        for m, end in zip(matches, [*starts, len(text)], strict=False)
-    ]
-
-
-def _names(listed: str) -> list[str]:
-    listed = re.sub(r"^\s*\d{1,2}\s*[-–]", "", listed).strip()
-    if listed.startswith("None"):
-        return []
-    return [name.strip() for name in listed.split(",") if name.strip()]
-
-
-def quoted_counts(quote: str) -> dict[str, int]:
-    """Votes per category that a quote shows, from its label lines and its table lines."""
-    counts = dict.fromkeys(CATEGORY_LABELS, 0)
-    for category, listed in _labelled(" ".join(quote.split())):
-        number = re.search(r"\b(\d{1,2})\s*[-–]", listed)
-        counts[category] += int(number[1]) if number else len(_names(listed))
-    for line in quote.split("\n"):
-        row = TABLE_LINE.search(" ".join(line.split()))
-        if row:
-            counts[str(row.lastgroup)] += 1
-    return counts
-
-
 def _is_vote_line(line: str) -> bool:
     return any(label in line for label in VOTE_LABELS) or TABLE_LINE.search(line) is not None
 
@@ -91,8 +42,8 @@ def _vote(identifier: str, text: str) -> dict[str, Any] | None:
     quoted = lines[marked[0] : marked[-1] + 1]
     members = []
     for line in quoted:
-        for category, listed in _labelled(line):
-            members += [{"name": n, "value": MEMBER_VALUES[category]} for n in _names(listed)]
+        for category, listed in labelled(line):
+            members += [{"name": n, "value": MEMBER_VALUES[category]} for n in names(listed)]
         row = TABLE_LINE.search(line)
         if row:
             name = line[: line.rindex("|")].strip()
