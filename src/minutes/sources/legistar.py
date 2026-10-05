@@ -1,3 +1,4 @@
+import json
 import re
 from datetime import date
 from typing import Any
@@ -5,7 +6,7 @@ from typing import Any
 import httpx
 
 from minutes.config import CityConfig
-from minutes.errors import PermanentStageError
+from minutes.errors import PermanentStageError, SourceError
 from minutes.sources.base import (
     USER_AGENT,
     DocRef,
@@ -60,7 +61,10 @@ class LegistarSource:
                 params={**params, "$skip": str(len(events))},
             )
             check_status(response)
-            page = response.json()
+            try:
+                page = response.json()
+            except json.JSONDecodeError as err:
+                raise SourceError("invalid json") from err
             events.extend(page)
             if len(page) < 1000:
                 break

@@ -88,7 +88,7 @@ def get(
         HOST_THROTTLE.wait(current_url)
         try:
             response = client.get(current_url, params=current_params, follow_redirects=False)
-        except (httpx.TimeoutException, httpx.NetworkError) as err:
+        except httpx.TransportError as err:
             raise SourceError(str(err) or type(err).__name__) from err
         if not follow_redirects or not response.is_redirect:
             return response

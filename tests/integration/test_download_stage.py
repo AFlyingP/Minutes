@@ -131,13 +131,16 @@ def test_permanent_error_marks_document_failed(
 
     monkeypatch.setattr(download, "get_source", lambda *args: FailingSource())
     with db.connect(url) as conn:
-        queue.enqueue(conn, "download", "alder-agenda-101", "fixture")
+        job_id = queue.enqueue(conn, "download", "alder-agenda-101", "fixture")
+        assert job_id is not None
 
     summary = worker.run("fixture", drain=True, stage="download")
     with db.connect(url) as conn:
         row = conn.execute(
             "SELECT status, fail_reason FROM documents WHERE id = %s", ("alder-agenda-101",)
         ).fetchone()
+        job = conn.execute("SELECT status FROM jobs WHERE id = %s", (job_id,)).fetchone()
 
     assert summary.failed == 1
     assert row == ("failed", "missing fixture")
+    assert job == ("failed",)

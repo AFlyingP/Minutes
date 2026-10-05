@@ -77,7 +77,12 @@ class GranicusSource:
             if not first_cell or not row_date:
                 continue
             name = _text(first_cell[1])
-            meeting_date = date(int(row_date[3]), MONTHS.index(row_date[1]) + 1, int(row_date[2]))
+            try:
+                meeting_date = date(
+                    int(row_date[3]), MONTHS.index(row_date[1]) + 1, int(row_date[2])
+                )
+            except ValueError:
+                continue
             if not date_from <= meeting_date <= date_to or re.search(r"cancel", name, re.I):
                 continue
             if re.search(r"planning commission", name, re.I):

@@ -31,6 +31,14 @@ def test_two_column_reading_order() -> None:
     assert text.splitlines() == [word.text for word in left + right]
 
 
+def test_gutter_ending_at_70_percent_is_accepted_on_letter_width() -> None:
+    bin_width = 612 / 200
+    left = [Word(f"left{i}", 60, 100 + 10 * i, 100 * bin_width, 108 + 10 * i) for i in range(25)]
+    right = [Word(f"right{i}", 140 * bin_width, 105 + 10 * i, 550, 113 + 10 * i) for i in range(25)]
+    text, _ = build_text(list(reversed(right + left)), [], 612, 792)
+    assert text.splitlines() == [word.text for word in left + right]
+
+
 def test_full_width_line_splits_bands() -> None:
     above = [Word("above-left", 100, 50, 350, 60), Word("above-right", 650, 50, 900, 60)]
     heading = Word("heading", 100, 70, 900, 78)

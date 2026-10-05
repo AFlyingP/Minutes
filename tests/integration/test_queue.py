@@ -13,6 +13,8 @@ from minutes.cli import app
 from minutes.config import get_settings
 from minutes.ingest import pipeline
 
+pytestmark = pytest.mark.integration
+
 Connection = psycopg.Connection[TupleRow]
 
 
@@ -59,14 +61,17 @@ def test_retryable_failure_requeues_with_future_run_after(conn: Connection) -> N
 
     assert queue.fail(conn, job.id, "temporary failure", permanent=False) == "queued"
     row = conn.execute(
-        "SELECT status, attempts, run_after > now() FROM jobs WHERE id = %s", (job.id,)
+        "SELECT status, attempts, run_after > now(), "
+        "extract(epoch FROM run_after - now()) FROM jobs WHERE id = %s",
+        (job.id,),
     ).fetchone()
     assert row is not None
-    status, attempts, run_after = row
+    status, attempts, run_after, delay = row
 
     assert status == "queued"
     assert attempts == 1
     assert run_after
+    assert float(delay) == pytest.approx(queue.backoff_seconds(job.id, 1), abs=0.01)
 
 
 def test_fifth_failure_marks_dead(conn: Connection) -> None:
@@ -152,6 +157,65 @@ def test_retry_dead_requeues(conn: Connection) -> None:
     assert attempts == 0
     assert finished_at is None
     assert last_error == "old failure"
+
+
+@pytest.mark.parametrize("active_status", ["queued", "running"])
+def test_retry_dead_skips_pair_with_active_job(conn: Connection, active_status: str) -> None:
+    document_id = f"queue-{uuid4().hex}"
+    conn.execute("DELETE FROM jobs")
+    dead_id = queue.enqueue(conn, "parse", document_id, "fixture")
+    assert dead_id is not None
+    conn.execute(
+        "UPDATE jobs SET status = 'dead', attempts = 5, finished_at = now() WHERE id = %s",
+        (dead_id,),
+    )
+    active_id = queue.enqueue(conn, "parse", document_id, "fixture")
+    assert active_id is not None
+    conn.execute("UPDATE jobs SET status = %s WHERE id = %s", (active_status, active_id))
+
+    assert queue.retry_dead(conn) == 0
+    assert conn.execute(
+        "SELECT id, status, attempts, finished_at IS NOT NULL FROM jobs ORDER BY id"
+    ).fetchall() == [(dead_id, "dead", 5, True), (active_id, active_status, 0, False)]
+
+
+def test_retry_dead_requeues_one_job_per_pair(conn: Connection) -> None:
+    documents = [f"queue-{uuid4().hex}", f"queue-{uuid4().hex}"]
+    conn.execute("DELETE FROM jobs")
+    pairs = [("parse", documents[0]), ("download", documents[0]), ("parse", documents[1])]
+    expected = []
+    for stage, document_id in pairs:
+        for index in range(2):
+            job_id = queue.enqueue(conn, stage, document_id, "fixture")
+            assert job_id is not None
+            conn.execute(
+                "UPDATE jobs SET status = 'dead', attempts = 5, finished_at = now(), "
+                "run_after = now() + interval '1 day', locked_by = 'old-worker', "
+                "locked_at = now(), last_error = 'old failure' WHERE id = %s",
+                (job_id,),
+            )
+            expected.append(
+                (
+                    job_id,
+                    "dead" if index == 0 else "queued",
+                    5 if index == 0 else 0,
+                    index == 0,
+                    index == 0,
+                    index == 0,
+                    index == 0,
+                    "old failure",
+                )
+            )
+
+    assert queue.retry_dead(conn) == len(pairs)
+    assert (
+        conn.execute(
+            "SELECT id, status, attempts, finished_at IS NOT NULL, run_after > now(), "
+            "locked_by IS NOT NULL, locked_at IS NOT NULL, last_error FROM jobs ORDER BY id"
+        ).fetchall()
+        == expected
+    )
+    assert queue.retry_dead(conn) == 0
 
 
 @pytest.fixture

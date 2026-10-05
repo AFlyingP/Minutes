@@ -48,6 +48,22 @@ def test_rows_parsed_with_body_mapping() -> None:
     assert listed[0][1][2].source_url == "https://lincoln.granicus.com/videos/41/captions.vtt"
 
 
+def test_row_with_impossible_date_is_skipped() -> None:
+    page = """
+    <tr><td>City Council Regular Meeting Feb 30, 2024</td><td>clip_id=71</td></tr>
+    <tr><td>City Council Regular Meeting Mar 5, 2024</td><td>clip_id=72</td></tr>
+    """
+    with httpx.Client(
+        transport=httpx.MockTransport(lambda request: httpx.Response(200, text=page))
+    ) as client:
+        listed = GranicusSource("lincoln", CITY, DATE_FROM, DATE_TO, client).list_meetings(
+            DATE_FROM, DATE_TO
+        )
+
+    assert [meeting.id for meeting, _ in listed] == ["lincoln-72"]
+    assert listed[0][0].meeting_date == date(2024, 3, 5)
+
+
 def test_minutes_link_requires_minutes_label() -> None:
     page = """
     <tr><td>City Council Regular Meeting Mar 5, 2024</td>

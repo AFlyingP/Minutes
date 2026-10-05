@@ -111,7 +111,11 @@ def requeue_stale(conn: Connection) -> int:
 def retry_dead(conn: Connection) -> int:
     result = conn.execute(
         "UPDATE jobs SET status = 'queued', attempts = 0, run_after = now(), "
-        "finished_at = NULL, locked_by = NULL, locked_at = NULL WHERE status = 'dead'"
+        "finished_at = NULL, locked_by = NULL, locked_at = NULL WHERE id IN ("
+        "SELECT max(dead.id) FROM jobs dead WHERE dead.status = 'dead' AND NOT EXISTS ("
+        "SELECT 1 FROM jobs active WHERE active.stage = dead.stage "
+        "AND active.document_id = dead.document_id AND active.status IN ('queued', 'running')) "
+        "GROUP BY dead.stage, dead.document_id)"
     )
     if result.rowcount:
         conn.execute("NOTIFY minutes_jobs")

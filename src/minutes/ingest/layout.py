@@ -99,8 +99,8 @@ def _gutter(words: list[Word], width: float, height: float) -> tuple[float, floa
             index += 1
         left, right = start * bin_width, index * bin_width
         if (
-            left >= 0.30 * width
-            and right <= 0.70 * width
+            start >= 60
+            and index <= 140
             and right - left >= 0.025 * width
             and sum(word.x1 <= left for word in body) >= 25
             and sum(word.x0 >= right for word in body) >= 25

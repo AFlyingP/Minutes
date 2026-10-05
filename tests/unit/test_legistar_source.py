@@ -169,6 +169,29 @@ def test_fetch_maps_http_errors(status: int, error: type[Exception]) -> None:
             source.fetch(document)
 
 
+def test_closed_connection_is_source_error() -> None:
+    def respond(request: httpx.Request) -> httpx.Response:
+        raise httpx.RemoteProtocolError("server disconnected", request=request)
+
+    with httpx.Client(transport=httpx.MockTransport(respond)) as client:
+        source = LegistarSource("seattle", CITY, DATE_FROM, DATE_TO, client)
+        with pytest.raises(SourceError, match="server disconnected") as error:
+            source.list_meetings(DATE_FROM, DATE_TO)
+
+    assert isinstance(error.value.__cause__, httpx.RemoteProtocolError)
+
+
+def test_non_json_listing_is_source_error() -> None:
+    with httpx.Client(
+        transport=httpx.MockTransport(lambda request: httpx.Response(200, text="not json"))
+    ) as client:
+        source = LegistarSource("seattle", CITY, DATE_FROM, DATE_TO, client)
+        with pytest.raises(SourceError, match=r"^invalid json$") as error:
+            source.list_meetings(DATE_FROM, DATE_TO)
+
+    assert isinstance(error.value.__cause__, json.JSONDecodeError)
+
+
 class FakeCursor:
     def __init__(self, rows: list[tuple[str, str, str]]) -> None:
         self.rows = rows

@@ -90,7 +90,7 @@ def test_unknown_document_is_not_found(fixture_corpus: str, conn: Connection) ->
         pipeline.run_stage(conn, "parse", "alder-minutes-999", "fixture")
 
 
-def test_gpu_models_are_not_available_yet(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_gpu_embedder_is_not_available_yet(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("MINUTES_MODELS_MODE", "gpu")
     get_settings.cache_clear()
     try:
