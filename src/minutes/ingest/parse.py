@@ -9,7 +9,7 @@ from psycopg.rows import TupleRow
 from psycopg.types.json import Jsonb
 
 from minutes.errors import NotFoundError, PermanentStageError
-from minutes.ingest import ocr
+from minutes.ingest import captions, ocr
 from minutes.ingest.layout import Table, Word, build_text
 
 
@@ -20,7 +20,7 @@ def image_area_ratio(page: Page) -> float:
 
 
 def run(conn: psycopg.Connection[TupleRow], document_id: str) -> dict[str, object]:
-    """Replace the document's units with one per PDF page; caption files get none yet."""
+    """Replace the document's units with PDF pages or caption segments."""
     row = conn.execute(
         "SELECT file_path, media_type FROM documents WHERE id = %s", (document_id,)
     ).fetchone()
@@ -28,6 +28,10 @@ def run(conn: psycopg.Connection[TupleRow], document_id: str) -> dict[str, objec
         raise NotFoundError(f"unknown document {document_id}")
     file_path, media_type = row
     conn.execute("DELETE FROM units WHERE document_id = %s", (document_id,))
+    if media_type in ("application/x-subrip", "text/vtt"):
+        count = captions.build_units(conn, document_id)
+        conn.execute("UPDATE documents SET unit_count = %s WHERE id = %s", (count, document_id))
+        return {"units": count, "needs_ocr": 0}
     if media_type != "application/pdf":
         return {"units": 0, "needs_ocr": 0}
     try:
