@@ -4,6 +4,7 @@ import { createBrowserRouter, RouterProvider } from "react-router-dom";
 
 import App, { Placeholder } from "./App";
 import DocPage from "./pages/DocPage";
+import LabelPage from "./pages/LabelPage";
 import SearchPage from "./pages/SearchPage";
 import "./styles.css";
 
@@ -16,7 +17,7 @@ const router = createBrowserRouter([
       { path: "facts", element: <Placeholder /> },
       { path: "ask", element: <Placeholder /> },
       { path: "agent", element: <Placeholder /> },
-      { path: "label", element: <Placeholder /> },
+      { path: "label", element: <LabelPage /> },
       { path: "doc/:id", element: <DocPage /> },
     ],
   },
