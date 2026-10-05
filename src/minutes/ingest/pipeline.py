@@ -12,6 +12,7 @@ from psycopg.types.json import Jsonb
 from minutes import db
 from minutes.config import CONFIG_DIR, Corpus, get_settings, load_cities
 from minutes.errors import NotFoundError
+from minutes.extract import extractor
 from minutes.ingest import chunk, embed, parse, segment
 from minutes.sources import get_source
 from minutes.sources.base import DocRef
@@ -85,10 +86,6 @@ def _ocr(conn: Connection, document_id: str) -> dict[str, object]:
     return {"ocr_pages": 0}
 
 
-def _extract(conn: Connection, document_id: str) -> dict[str, object]:
-    return {"facts": 0, "rejected": 0}
-
-
 STAGE_FUNCTIONS: dict[str, Callable[[Connection, str], dict[str, object]]] = {
     "download": _download,
     "parse": parse.run,
@@ -96,7 +93,7 @@ STAGE_FUNCTIONS: dict[str, Callable[[Connection, str], dict[str, object]]] = {
     "segment": segment.run,
     "chunk": chunk.run,
     "embed": embed.run,
-    "extract": _extract,
+    "extract": extractor.run,
 }
 
 
