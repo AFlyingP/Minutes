@@ -91,14 +91,15 @@ test("renders page image, text, and mark for the given range", async () => {
 
 test("draws one highlight per overlapping box", async () => {
   mockFetch();
-  renderPage(`/doc/${DOCUMENT.id}?start=15&end=22`);
+  renderPage(`/doc/${DOCUMENT.id}?start=15&end=26`);
   await screen.findByTestId("page-image");
   const highlights = screen.getAllByTestId("highlight");
-  expect(highlights).toHaveLength(1);
+  expect(highlights).toHaveLength(2);
   expect(highlights[0].style.left).toBe("30%");
   expect(highlights[0].style.top).toBe("20%");
   expect(parseFloat(highlights[0].style.width)).toBeCloseTo(10);
   expect(parseFloat(highlights[0].style.height)).toBeCloseTo(5);
+  expect(highlights[1].style.left).toBe("40%");
   fireEvent.click(screen.getByTestId("unit-next"));
   await screen.findByText("p. 2 of 3");
   expect(screen.queryByTestId("mark")).not.toBeInTheDocument();

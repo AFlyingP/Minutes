@@ -1,6 +1,9 @@
 import json
 import os
+import re
+import sys
 from datetime import datetime
+from io import TextIOWrapper
 from pathlib import Path
 from typing import Annotated, Any, Literal, NoReturn
 from urllib.parse import urlsplit
@@ -80,6 +83,9 @@ LABEL_RULES = PRODUCTION_RULES
 @app.callback()
 def main() -> None:
     """Search and question answering over city council records."""
+    for stream in (sys.stdout, sys.stderr):
+        if isinstance(stream, TextIOWrapper):
+            stream.reconfigure(encoding="utf-8")
     configure_logging(get_settings().log_level)
     bind_correlation_id(new_correlation_id())
 
@@ -464,6 +470,7 @@ def labels_text_search(
         result = store.text_search(conn, city, query)
     typer.echo(f"unit_count={result.unit_count}")
     for document, index, snippet in result.matches:
+        snippet = re.sub(r"\s+", " ", snippet)
         typer.echo(f"{document} {index} {snippet}")
 
 

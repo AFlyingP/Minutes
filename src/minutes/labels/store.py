@@ -179,8 +179,13 @@ def _agenda_messages(
     if row is None or row[0] != city:
         messages.append("unknown meeting")
     else:
-        if payload.meeting_id not in sample_meetings(conn, city):
-            messages.append("meeting is not sampled")
+        try:
+            sampled = sample_meetings(conn, city)
+        except CorpusError as err:
+            messages.append(str(err))
+        else:
+            if payload.meeting_id not in sampled:
+                messages.append("meeting is not sampled")
         if row[1] is None:
             messages.append("meeting has no downloaded agenda")
         elif any(not 1 <= item.start_page <= row[1] for item in payload.items):

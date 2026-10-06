@@ -118,7 +118,7 @@ def test_per_type_and_per_reason_rules() -> None:
         "Q-4: expected 4, found 3 (seattle amount)",
     ]
     assert "Q-8: expected at least 1, found 0 (seattle entity_not_in_corpus)" in messages
-    assert "Q-8: expected at least 1, found 2 (seattle false_premise)" not in messages
+    assert not any("false_premise" in message for message in messages if message.startswith("Q-8:"))
 
 
 def test_at_most_4_questions_per_document() -> None:

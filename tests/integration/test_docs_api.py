@@ -101,18 +101,43 @@ def test_image_dpi_out_of_range_is_422(client: TestClient) -> None:
         assert response.json()["error"] == "validation_error"
 
 
-def test_documents_list_filters_and_orders(client: TestClient) -> None:
+def test_documents_list_filters_and_orders(client: TestClient, conn: Connection) -> None:
+    for document, meeting, meeting_date in (
+        ("birch-list-a", "birch-list-late", "2024-04-09"),
+        ("birch-list-z", "birch-list-early", "2024-03-12"),
+    ):
+        conn.execute(
+            "INSERT INTO meetings (id, city_id, body, meeting_date, title, source_key) "
+            "VALUES (%s, 'birch', 'City Council', %s, 'List order meeting', %s)",
+            (meeting, meeting_date, meeting),
+        )
+        conn.execute(
+            "INSERT INTO documents (id, meeting_id, city_id, kind, source_url, media_type, "
+            "unit_kind, status, unit_count) VALUES (%s, %s, 'birch', 'minutes', "
+            "'https://fixture.invalid/minutes', 'application/pdf', 'page', 'downloaded', 1)",
+            (document, meeting),
+        )
     params = {"city": "birch", "kind": "minutes"}
     response = client.get("/api/documents", params=params)
     assert response.status_code == 200
     body = response.json()
-    assert body["total"] == 2
-    assert [doc["id"] for doc in body["documents"]] == ["birch-minutes-201", "birch-minutes-202"]
-    assert [doc["meeting_date"] for doc in body["documents"]] == ["2024-03-12", "2024-04-09"]
+    assert body["total"] == 4
+    assert [doc["id"] for doc in body["documents"]] == [
+        "birch-list-z",
+        "birch-minutes-201",
+        "birch-list-a",
+        "birch-minutes-202",
+    ]
+    assert [doc["meeting_date"] for doc in body["documents"]] == [
+        "2024-03-12",
+        "2024-03-12",
+        "2024-04-09",
+        "2024-04-09",
+    ]
     page = client.get("/api/documents", params={**params, "limit": 1, "offset": 1}).json()
-    assert page["total"] == 2
-    assert [doc["id"] for doc in page["documents"]] == ["birch-minutes-202"]
-    assert client.get("/api/documents").json()["total"] == 12
+    assert page["total"] == 4
+    assert [doc["id"] for doc in page["documents"]] == ["birch-minutes-201"]
+    assert client.get("/api/documents").json()["total"] == 14
     for invalid in ({"city": "missing"}, {"kind": "missing"}, {"limit": 501}, {"offset": -1}):
         assert client.get("/api/documents", params=invalid).status_code == 422
 

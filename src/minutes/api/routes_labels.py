@@ -16,7 +16,7 @@ from minutes.api.schemas import (
     TextMatchOut,
     TextSearchOut,
 )
-from minutes.errors import ValidationError
+from minutes.errors import CorpusError, ValidationError
 from minutes.labels import export, store
 from minutes.labels.rules import PRODUCTION_RULES, check
 from minutes.labels.schema import Label, LabelIn, LabelType
@@ -83,7 +83,10 @@ def text_search(
 @router.get("/sample-meetings")
 def sample_meetings(conn: Conn, city: str) -> SampleMeetingsOut:
     _check_city(conn, city)
-    ids = store.sample_meetings(conn, city)
+    try:
+        ids = store.sample_meetings(conn, city)
+    except CorpusError as err:
+        raise ValidationError(str(err)) from err
     rows = conn.execute(
         "SELECT m.id, m.body, m.meeting_date, d.id, EXISTS ("
         "SELECT 1 FROM labels l WHERE l.label_type = 'agenda_count' "

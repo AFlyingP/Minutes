@@ -207,6 +207,15 @@ def test_text_search_endpoint_returns_count_and_snippets(client: TestClient) -> 
         assert client.get("/api/labels/text-search", params=params).status_code == 422
 
 
+def test_sample_meetings_with_too_few_agendas_is_422(client: TestClient) -> None:
+    response = client.get("/api/labels/sample-meetings", params={"city": "birch"})
+    assert response.status_code == 422
+    assert response.json() == {
+        "error": "validation_error",
+        "detail": "city birch needs at least 10 downloaded agendas",
+    }
+
+
 def test_sample_meetings_endpoint_marks_labelled(
     client: TestClient, conn: Connection, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

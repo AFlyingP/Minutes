@@ -273,6 +273,38 @@ def test_cli_page_find_prints_offsets(conn: Connection) -> None:
     assert repeated.stdout.splitlines() == ["start=1 end=4 text=ana", "start=8 end=11 text=ana"]
 
 
+def test_text_search_prints_one_line_per_match(conn: Connection) -> None:
+    query = "Granite Works"
+    matches = store.text_search(conn, "birch", query)
+    assert any("\n" in snippet for _, _, snippet in matches.matches)
+    result = runner.invoke(
+        cli.app, ["labels", "text-search", "--corpus", "fixture", "--city", "birch", query]
+    )
+    assert result.exit_code == 0, result.output
+    assert result.stdout.splitlines() == [
+        f"unit_count={matches.unit_count}",
+        *[
+            f"{document} {index} {re.sub(r'\s+', ' ', snippet)}"
+            for document, index, snippet in matches.matches
+        ],
+    ]
+
+
+def test_page_text_outside_cp1252_prints_when_redirected(conn: Connection) -> None:
+    text = "Council approved the project in \u6771\u4eac."
+    with pytest.raises(UnicodeEncodeError):
+        text.encode("cp1252")
+    conn.execute(
+        "UPDATE units SET text = %s WHERE document_id = 'birch-minutes-201' AND unit_index = 1",
+        (text,),
+    )
+    result = CliRunner(charset="cp1252").invoke(
+        cli.app, ["labels", "page", "birch-minutes-201", "1", "--corpus", "fixture"]
+    )
+    assert result.exit_code == 0, result.exception
+    assert result.stdout_bytes.decode("utf-8").splitlines() == [text]
+
+
 def test_backup_and_restore_round_trip(conn: Connection, tmp_path: Path) -> None:
     labels = complete_labels(conn, tmp_path)
     reviewed = store.set_reviewed(conn, labels[0].id, True, labels_dir=tmp_path)

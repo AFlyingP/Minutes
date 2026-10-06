@@ -1,12 +1,20 @@
 import random
+from collections.abc import Callable
 from datetime import UTC, datetime
+from pathlib import Path
 
 import psycopg
 import pytest
 from psycopg.rows import TupleRow
 
 from minutes.config import load_cities
-from minutes.errors import CorpusError, LabelValidationError, NotFoundError, ValidationError
+from minutes.errors import (
+    CorpusError,
+    LabelsFrozenError,
+    LabelValidationError,
+    NotFoundError,
+    ValidationError,
+)
 from minutes.labels import store
 from minutes.labels.schema import LabelIn, Passage
 
@@ -15,8 +23,10 @@ NOW = datetime(2024, 5, 1, 12, 30, 45, tzinfo=UTC)
 
 
 @pytest.fixture(autouse=True)
-def source_corpus(fixture_corpus: str, monkeypatch: pytest.MonkeyPatch) -> None:
+def source_corpus(fixture_corpus: str, monkeypatch: pytest.MonkeyPatch) -> Callable[[Path], bool]:
+    is_frozen = store.is_frozen
     monkeypatch.setattr(store, "is_frozen", lambda *_: False)
+    return is_frozen
 
 
 def passage(
@@ -70,6 +80,19 @@ def test_create_assigns_sequential_id_and_utc(conn: psycopg.Connection[TupleRow]
     assert not first.human_reviewed
     assert store.list_labels(conn, "question", "birch") == [first, second]
     assert store.list_labels(conn, "extraction", "birch") == []
+
+
+def test_frozen_labels_reject_create_at_store_level(
+    conn: psycopg.Connection[TupleRow],
+    tmp_path: Path,
+    source_corpus: Callable[[Path], bool],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(store, "is_frozen", source_corpus)
+    (tmp_path / "manifest.json").write_text('{"frozen": true}', encoding="utf-8")
+    with pytest.raises(LabelsFrozenError, match="labels are frozen"):
+        store.create(conn, question([passage(conn)]), labels_dir=tmp_path)
+    assert store.list_labels(conn) == []
 
 
 def test_passage_text_must_match_stored_unit_text(conn: psycopg.Connection[TupleRow]) -> None:
@@ -138,6 +161,18 @@ def test_five_consecutive_words_allowed(conn: psycopg.Connection[TupleRow]) -> N
     )
 
 
+def test_question_copying_second_passage_is_rejected(
+    conn: psycopg.Connection[TupleRow],
+) -> None:
+    first = passage(conn)
+    second = passage(
+        conn, "birch-minutes-201", 1, "for the Oak Street Sidewalk Repair Project in the"
+    )
+    assert messages(
+        conn, question([first, second], question="Who endorsed FOR the Oak Street Sidewalk Repair?")
+    ) == ["question copies more than 5 consecutive words from passage 2"]
+
+
 def test_multi_passage_requires_two_pages_of_one_meeting(
     conn: psycopg.Connection[TupleRow],
 ) -> None:
@@ -200,6 +235,23 @@ def test_absence_search_hits_must_equal_stored_count(conn: psycopg.Connection[Tu
         {"query": "stone mine", "hits": 0},
     ]
     assert store.create(conn, case, now=lambda: NOW)
+
+
+def test_agenda_count_in_city_with_too_few_agendas_is_a_validation_message(
+    conn: psycopg.Connection[TupleRow],
+) -> None:
+    case = LabelIn(
+        type="agenda_count",
+        city="birch",
+        author="human",
+        payload={
+            "meeting_id": "birch-201",
+            "count": 1,
+            "items": [{"identifier": "9.B", "title": "Sidewalk repair", "start_page": 2}],
+        },
+    )
+    assert messages(conn, case) == ["agenda_count: city birch needs at least 10 downloaded agendas"]
+    assert store.list_labels(conn) == []
 
 
 def test_agenda_count_must_be_sampled_meeting_and_match_items(
@@ -272,6 +324,45 @@ def test_extraction_vote_record_must_match_passage_counts(
     assert messages(conn, case) == ["extraction: vote_count_mismatch"]
     case.payload["record"] = record | {"ayes": 4}
     assert store.create(conn, case, now=lambda: NOW)
+
+
+@pytest.mark.parametrize(
+    "changes,expected",
+    [
+        ({"document_id": "missing-document"}, "unknown document missing-document"),
+        ({"document_id": "alder-minutes-101"}, "unknown document alder-minutes-101"),
+        ({"unit_index": 999}, "offsets out of range"),
+        ({"end": 10000}, "offsets out of range"),
+        ({"text": "wrong source text"}, "text does not match stored unit text"),
+        ({"end": 9, "text": "Ayes: Gra"}, "length must be 10 to 2000 characters"),
+    ],
+)
+def test_extraction_passage_rules_are_checked(
+    conn: psycopg.Connection[TupleRow], changes: dict[str, object], expected: str
+) -> None:
+    p = passage(conn, text="Ayes: Gray, Hale, Ivers, Jones")
+    if changes.get("end") == 9:
+        changes = changes | {"end": Passage.model_validate(p).start + 9}
+    case = LabelIn(
+        type="extraction",
+        city="birch",
+        author="human",
+        payload={
+            "kind": "vote",
+            "passage": p | changes,
+            "record": {
+                "subject_identifier": None,
+                "ayes": 4,
+                "noes": 0,
+                "abstain": 0,
+                "absent": 0,
+                "members": [],
+                "outcome": "passed",
+            },
+        },
+    )
+    assert f"passage 1: {expected}" in messages(conn, case)
+    assert store.list_labels(conn) == []
 
 
 def test_extraction_passage_must_be_agenda_or_minutes(conn: psycopg.Connection[TupleRow]) -> None:
@@ -421,6 +512,27 @@ def test_absence_queries_must_be_distinct(conn: psycopg.Connection[TupleRow]) ->
         {"query": query, "hits": 0} for query in ("quarry", "QUARRY", "stone mine")
     ]
     assert messages(conn, case) == ["absence searches must have distinct lowercased queries"]
+
+
+@pytest.mark.parametrize(
+    "answer_type,answer", [("number", "four"), ("date", "March 12"), ("date", "2024-02-30")]
+)
+def test_agent_task_answer_must_match_answer_type(
+    conn: psycopg.Connection[TupleRow], answer_type: str, answer: str
+) -> None:
+    case = LabelIn(
+        type="agent_task",
+        city="birch",
+        author="human",
+        payload={
+            "question": "Which contracts were approved?",
+            "answer": answer,
+            "answer_type": answer_type,
+            "document_ids": ["birch-agenda-201", "birch-minutes-201"],
+        },
+    )
+    assert messages(conn, case) == [f"answer does not match answer_type {answer_type}"]
+    assert store.list_labels(conn) == []
 
 
 def test_agent_task_documents_must_be_distinct_and_local(

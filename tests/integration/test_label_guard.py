@@ -47,16 +47,8 @@ def test_quality_stages_refuse_before_label_freeze(
         assert pipeline.run_stage(conn, stage, "birch-minutes-201", "dev").status == "skipped"
 
 
-def test_labels_refused_when_derived_outputs_exist(
-    conn: Connection, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    conn.execute("DELETE FROM facts")
-    conn.execute("DELETE FROM items")
-    conn.execute("DELETE FROM chunks WHERE id != (SELECT min(id) FROM chunks)")
-    row = conn.execute("SELECT count(*) FROM chunks").fetchone()
-    assert row == (1,)
-    monkeypatch.setattr(get_settings(), "corpus", "dev")
-    label = LabelIn(
+def unanswerable() -> LabelIn:
+    return LabelIn(
         type="question",
         city="birch",
         author="human",
@@ -69,12 +61,67 @@ def test_labels_refused_when_derived_outputs_exist(
             ],
         },
     )
+
+
+def keep_one_output(conn: Connection, table: str) -> None:
+    if table in ("chunks", "facts"):
+        conn.execute(f"UPDATE {table} SET item_id = NULL")
+    for other in ("facts", "chunks", "items"):
+        if other != table:
+            conn.execute(f"DELETE FROM {other}")
+    conn.execute(f"DELETE FROM {table} WHERE id != (SELECT min(id) FROM {table})")
+    for other in ("items", "chunks", "facts"):
+        assert conn.execute(f"SELECT count(*) FROM {other}").fetchone() == (
+            1 if other == table else 0,
+        )
+
+
+def test_labels_refused_when_derived_outputs_exist(
+    conn: Connection, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    conn.execute("DELETE FROM facts")
+    conn.execute("DELETE FROM items")
+    conn.execute("DELETE FROM chunks WHERE id != (SELECT min(id) FROM chunks)")
+    row = conn.execute("SELECT count(*) FROM chunks").fetchone()
+    assert row == (1,)
+    monkeypatch.setattr(get_settings(), "corpus", "dev")
     with pytest.raises(LabelValidationError) as error:
-        store.create(conn, label, labels_dir=tmp_path)
+        store.create(conn, unanswerable(), labels_dir=tmp_path)
     assert error.value.args[0] == [
         "derived outputs exist; labels must be written from source pages only"
     ]
     assert store.list_labels(conn) == []
+
+
+@pytest.mark.parametrize("table", ["items", "facts"])
+def test_labels_refused_when_items_or_facts_exist(
+    conn: Connection, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, table: str
+) -> None:
+    keep_one_output(conn, table)
+    monkeypatch.setattr(get_settings(), "corpus", "dev")
+    with pytest.raises(LabelValidationError) as error:
+        store.create(conn, unanswerable(), labels_dir=tmp_path)
+    assert error.value.args[0] == [
+        "derived outputs exist; labels must be written from source pages only"
+    ]
+    assert store.list_labels(conn) == []
+
+
+@pytest.mark.parametrize("table", ["items", "chunks", "facts"])
+def test_update_refused_when_derived_outputs_exist(
+    conn: Connection, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, table: str
+) -> None:
+    label = unanswerable()
+    created = store.create(conn, label, labels_dir=tmp_path)
+    keep_one_output(conn, table)
+    monkeypatch.setattr(get_settings(), "corpus", "dev")
+    label.note = "rechecked source"
+    with pytest.raises(LabelValidationError) as error:
+        store.update(conn, created.id, label, labels_dir=tmp_path)
+    assert error.value.args[0] == [
+        "derived outputs exist; labels must be written from source pages only"
+    ]
+    assert store.get(conn, created.id) == created
 
 
 def test_search_cli_refuses_before_freeze_on_dev_corpus(

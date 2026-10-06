@@ -63,6 +63,19 @@ def test_unanswerable_question_requires_reason_from_closed_list() -> None:
         parse_payload("question", ABSENT | {"absence_searches": []})
 
 
+def test_two_absence_searches_are_rejected() -> None:
+    with pytest.raises(ValidationError) as error:
+        parse_payload(
+            "question",
+            ABSENT
+            | {"absence_searches": [{"query": query, "hits": 0} for query in ("quarry", "mine")]},
+        )
+    assert any(
+        detail["loc"] == ("absence_searches",) and detail["type"] == "too_short"
+        for detail in error.value.errors()
+    )
+
+
 def test_extra_keys_are_rejected() -> None:
     with pytest.raises(ValidationError):
         parse_payload("question", QUESTION | {"extra": True})

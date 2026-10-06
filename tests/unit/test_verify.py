@@ -91,8 +91,11 @@ def test_quote_offsets_point_at_original_text() -> None:
     assert result.quote_start == text.index("Gray")
     assert result.quote_end == text.index("  Afterword")
     assert ws(text[result.quote_start : result.quote_end]) == ws(quote)
+
+
+def test_unknown_kind_raises_value_error() -> None:
     with pytest.raises(ValueError, match="unknown fact kind"):
-        verify("unknown", {}, text)
+        verify("unknown", {}, "Some source text")
 
 
 def test_vote_counts_add_labels_and_table_rows() -> None:
