@@ -8,8 +8,7 @@ from psycopg.rows import TupleRow
 from typer.testing import CliRunner
 
 from minutes.cli import app
-from minutes.config import get_settings
-from minutes.errors import ConfigError, NotFoundError
+from minutes.errors import NotFoundError
 from minutes.ingest import pipeline
 from minutes.ingest.parse import render_page_png
 from minutes.models import get_embedder, get_ocr, get_reranker
@@ -88,17 +87,6 @@ def test_render_page_png_rejects_a_page_past_the_end() -> None:
 def test_unknown_document_is_not_found(fixture_corpus: str, conn: Connection) -> None:
     with pytest.raises(NotFoundError):
         pipeline.run_stage(conn, "parse", "alder-minutes-999", "fixture")
-
-
-def test_gpu_embedder_is_not_available_yet(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("MINUTES_MODELS_MODE", "gpu")
-    get_settings.cache_clear()
-    try:
-        with pytest.raises(ConfigError, match="models mode gpu is not available"):
-            get_embedder()
-    finally:
-        monkeypatch.undo()
-        get_settings.cache_clear()
 
 
 def test_discover_command_finds_nothing_new(fixture_corpus: str) -> None:
