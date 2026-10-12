@@ -108,4 +108,4 @@ def test_discover_command_finds_nothing_new(fixture_corpus: str) -> None:
 
 def test_fixtures_load_command_reloads_the_corpus(fixture_corpus: str) -> None:
     result = CliRunner().invoke(app, ["fixtures", "load"])
-    assert result.output == "loaded 12 documents\n"
+    assert result.stdout == "loaded 12 documents\n"

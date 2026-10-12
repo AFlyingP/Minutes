@@ -83,15 +83,34 @@ def test_probe_sources_with_mock_transport() -> None:
     assert results["seattle documents >= 200"].ok is False
 
 
-def test_probe_never_raises_and_hides_key(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_probe_never_raises_and_hides_key(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("MINUTES_DATA_DIR", "data")
+    config.get_settings.cache_clear()
     monkeypatch.setenv("MINUTES_LLM_BASE_URL", "http://127.0.0.1:9/v1")
     monkeypatch.setenv("MINUTES_LLM_API_KEY", KEY)
+    from minutes.llm import client as client_module
+
+    monkeypatch.setattr(client_module, "_LAST_START", None)
+    now = 0.0
+    waits: list[float] = []
+
+    def clock() -> float:
+        return now
+
+    def wait(seconds: float) -> None:
+        nonlocal now
+        waits.append(seconds)
+        now += seconds
 
     def refuse(request: httpx.Request) -> httpx.Response:
         raise httpx.ConnectError(f"refused, sent {request.headers['Authorization']}")
 
-    results = probe.probe_llm(httpx.MockTransport(refuse))
+    results = probe.probe_llm(httpx.MockTransport(refuse), clock=clock, wait=wait)
+    assert (tmp_path / "data" / "cache" / "llm_usage.json").is_file()
     assert len(results) == 4
+    assert len(waits) == 12
+    for actual, minimum in zip(waits, [2.0, 4.0, 8.0] * 4, strict=True):
+        assert minimum <= actual < minimum + 1
     for result in results:
         assert result.ok is False
         assert KEY not in result.detail

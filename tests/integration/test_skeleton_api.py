@@ -146,7 +146,7 @@ def test_search_and_ask_commands_print_hits_and_citations(fixture_corpus: str) -
     )
     declined = runner.invoke(app, ["ask", "zeppelin moorings", "--pipeline", "baseline"])
     assert re.match(r"1 \d\.\d{3} birch-\w+-201 p\. \d Birch City Council, ", found.output)
-    assert answered.output.splitlines() == [
+    assert answered.stdout.splitlines() == [
         "The roll call vote was 9 ayes and 1 noes. [1]",
         "[1] birch-minutes-201 p. 2",
     ]

@@ -4,6 +4,7 @@ import io
 import json
 import os
 import re
+import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import date
@@ -15,11 +16,11 @@ import pdfplumber
 from PIL import Image
 
 from minutes.config import FIXTURE_MANIFEST, CityConfig, get_settings, load_cities, load_models
-from minutes.errors import ConfigError
 from minutes.ingest import parse
 from minutes.ingest.layout import Word, build_text
 from minutes.ingest.ocr import DoctrEngine
 from minutes.ingest.quality import levenshtein
+from minutes.llm.client import ThinClient
 from minutes.sources import get_source
 from minutes.sources.base import DocRef, Source
 
@@ -39,19 +40,8 @@ class ProbeResult:
     detail: str
 
 
-def _api_key() -> str:
-    # a failure caused by bad settings still has to be reported
-    try:
-        return get_settings().llm_api_key
-    except ConfigError:
-        return ""
-
-
 def _failure(name: str, err: Exception) -> ProbeResult:
     detail = f"{type(err).__name__}: {err}"
-    key = _api_key()
-    if key:
-        detail = detail.replace(key, "***")
     return ProbeResult(name, False, detail[:200])
 
 
@@ -71,58 +61,61 @@ def _guarded(name: str, results: Callable[[], list[ProbeResult]]) -> list[ProbeR
         return [_failure(name, err)]
 
 
-def _chat(client: httpx.Client, model: str, prompt: str, schema: dict[str, Any] | None) -> str:
-    body: dict[str, Any] = {
-        "model": model,
-        "messages": [{"role": "user", "content": prompt}],
-        "max_completion_tokens": 300,
-        "reasoning_effort": "low",
-    }
-    if schema is not None:
-        body["response_format"] = {
-            "type": "json_schema",
-            "json_schema": {"name": "answer", "strict": True, "schema": schema},
-        }
-    response = client.post("/chat/completions", json=body)
-    response.raise_for_status()
-    content: str = response.json()["choices"][0]["message"]["content"]
-    return content
-
-
-def _plain_chat(client: httpx.Client, model: str) -> str:
-    if not _chat(client, model, "Reply with the word ok.", None).strip():
+def _plain_chat(client: ThinClient, model: str) -> str:
+    result = client.chat(
+        purpose="probe",
+        messages=[{"role": "user", "content": "Reply with the word ok."}],
+        model=model,
+        sample_index=0,
+    )
+    if not result.text.strip():
         raise ValueError("empty reply")
     return ""
 
 
-def _schema_chat(client: httpx.Client, model: str) -> str:
-    reply = _chat(client, model, "What is 2+3? Reply as JSON.", ANSWER_SCHEMA)
-    if json.loads(reply)["answer"] != 5:
-        raise ValueError(f"unexpected answer: {reply[:80]}")
+def _schema_chat(client: ThinClient, model: str) -> str:
+    result = client.chat(
+        purpose="probe",
+        messages=[{"role": "user", "content": "What is 2+3? Reply as JSON."}],
+        schema=ANSWER_SCHEMA,
+        schema_name="answer",
+        model=model,
+        sample_index=0,
+    )
+    if result.parsed is None or result.parsed.get("answer") != 5:
+        raise ValueError(f"unexpected answer: {result.text[:80]}")
     return ""
 
 
-def probe_llm(transport: httpx.BaseTransport | None = None) -> list[ProbeResult]:
-    return _guarded("config", lambda: _llm(transport))
+def probe_llm(
+    transport: httpx.BaseTransport | None = None,
+    *,
+    clock: Callable[[], float] = time.monotonic,
+    wait: Callable[[float], None] = time.sleep,
+) -> list[ProbeResult]:
+    return _guarded("config", lambda: _llm(transport, clock, wait))
 
 
-def _llm(transport: httpx.BaseTransport | None) -> list[ProbeResult]:
+def _llm(
+    transport: httpx.BaseTransport | None,
+    clock: Callable[[], float],
+    wait: Callable[[float], None],
+) -> list[ProbeResult]:
     settings = get_settings()
     if not settings.llm_base_url or not settings.llm_api_key:
         detail = "MINUTES_LLM_BASE_URL and MINUTES_LLM_API_KEY are required"
         return [ProbeResult("config", False, detail)]
     models = load_models()
-    results = []
     with httpx.Client(
-        base_url=settings.llm_base_url,
-        headers={"Authorization": f"Bearer {settings.llm_api_key}"},
-        timeout=httpx.Timeout(120, connect=10),
         transport=transport,
-    ) as client:
+        timeout=httpx.Timeout(120, connect=10),
+    ) as http:
+        client = ThinClient(http=http, cache=None, clock=clock, wait=wait)
+        results = []
         for model in (models.strong, models.cheap):
             results.append(_check(f"{model} chat", _plain_chat, client, model))
             results.append(_check(f"{model} json_schema", _schema_chat, client, model))
-    return results
+        return results
 
 
 def _first_pdf(source: Source, documents: list[DocRef]) -> str:

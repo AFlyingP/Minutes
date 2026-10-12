@@ -5,10 +5,15 @@ import math
 import re
 from typing import Any
 
-from minutes.config import get_settings
-from minutes.errors import ConfigError, LLMQuotaError
+from minutes.config import get_settings, load_models
+from minutes.errors import BudgetExceeded, ConfigError, LLMQuotaError
 from minutes.extract.verify import MEMBER_VALUES, TABLE_LINE, labelled, names, quoted_counts
 from minutes.llm import Budget, ChatResult
+from minutes.llm.cache import cache_key
+from minutes.llm.client import PER_CALL_CEILINGS, record_completed_call
+from minutes.llm.prices import cost_usd, estimate_usd
+from minutes.log import get_correlation_id
+from minutes.tracing import llm_span
 
 VOTE_LABELS = ("In Favor:", "Opposed:", "Ayes:", "Noes:", "Nays:", "Abstain:", "Absent:")
 SOURCE = re.compile(r"^\[(\d+)\] [^\n]*\n(.*?)(?=\n\n\[\d+\] |\Z)", re.M | re.S)
@@ -130,30 +135,74 @@ class StubClient:
         budget: Budget | None = None,
     ) -> ChatResult:
         global _quota_fault, _quota_calls
+        models = load_models()
+        try:
+            purpose_config = models.purposes[purpose]
+        except KeyError as err:
+            raise ConfigError(f"stub has no rule for purpose {purpose}") from err
+        resolved_model = model or (
+            models.strong if purpose_config.model == "strong" else models.cheap
+        )
+        token_params: dict[str, object] = {
+            "max_completion_tokens": purpose_config.max_tokens,
+            "reasoning_effort": purpose_config.reasoning_effort,
+            "schema_name": schema_name,
+            "schema": schema,
+        }
+        key = cache_key(resolved_model, messages, token_params, sample_index)
+        prompt_tokens = math.ceil(sum(len(message["content"]) for message in messages) / 4)
+
         fault = get_settings().fault
         if fault != _quota_fault:
             _quota_fault = fault
             _quota_calls = 0
-        if fault.startswith("llm_quota:"):
-            quota_count = int(fault.split(":")[1])
-            if _quota_calls < quota_count:
-                _quota_calls += 1
-                raise LLMQuotaError("injected quota fault")
-        user = messages[-1]["content"]
-        if purpose == "synth":
-            parsed = _synth(user)
-        elif purpose == "extract":
-            parsed = _extract(user)
-        else:
-            raise ConfigError(f"stub has no rule for purpose {purpose}")
-        text = json.dumps(parsed)
-        return ChatResult(
-            text=text,
-            parsed=parsed,
-            model="stub",
-            prompt_tokens=math.ceil(sum(len(m["content"]) for m in messages) / 4),
-            completion_tokens=math.ceil(len(text) / 4),
-            cost_usd=0.0,
-            latency_ms=0,
-            cached=False,
-        )
+        with llm_span(purpose, resolved_model) as span:
+            span.set_attribute("minutes.sample_index", sample_index)
+            span.set_attribute("minutes.correlation_id", get_correlation_id())
+            if fault.startswith("llm_quota:"):
+                quota_count = int(fault.split(":")[1])
+                if _quota_calls < quota_count:
+                    _quota_calls += 1
+                    raise LLMQuotaError("injected quota fault")
+            estimate = estimate_usd(resolved_model, messages, purpose_config.max_tokens)
+            ceiling = PER_CALL_CEILINGS[purpose]
+            if estimate > ceiling:
+                raise BudgetExceeded(
+                    f"call estimate {estimate:g} exceeds per-call ceiling {ceiling:g}"
+                )
+            if budget is not None:
+                budget.check(estimate)
+            user = messages[-1]["content"]
+            if purpose == "synth":
+                parsed = _synth(user)
+            elif purpose == "extract":
+                parsed = _extract(user)
+            else:
+                raise ConfigError(f"stub has no rule for purpose {purpose}")
+            text = json.dumps(parsed)
+            completion_tokens = math.ceil(len(text) / 4)
+            cost = cost_usd(resolved_model, prompt_tokens, completion_tokens)
+            if budget is not None:
+                budget.add(cost)
+            result = ChatResult(
+                text=text,
+                parsed=parsed,
+                model=resolved_model,
+                prompt_tokens=prompt_tokens,
+                completion_tokens=completion_tokens,
+                cost_usd=cost,
+                latency_ms=0,
+                cached=False,
+            )
+            record_completed_call(
+                span,
+                purpose=purpose,
+                model=resolved_model,
+                key=key,
+                cached=False,
+                prompt_tokens=prompt_tokens,
+                completion_tokens=completion_tokens,
+                cost=cost,
+                latency_ms=0,
+            )
+            return result

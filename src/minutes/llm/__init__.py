@@ -1,8 +1,8 @@
 from dataclasses import dataclass
 from typing import Protocol
 
-from minutes.config import get_settings
-from minutes.errors import BudgetExceeded, ConfigError
+from minutes.config import ROOT, get_settings
+from minutes.errors import BudgetExceeded
 
 
 @dataclass(frozen=True)
@@ -47,9 +47,14 @@ class LLMClient(Protocol):
 
 
 def get_client() -> LLMClient:
-    from minutes.llm.stub import StubClient
+    settings = get_settings()
+    if settings.llm_mode == "stub":
+        from minutes.llm.stub import StubClient
 
-    mode = get_settings().llm_mode
-    if mode != "stub":
-        raise ConfigError(f"llm mode {mode} is not available")
-    return StubClient()
+        return StubClient()
+    from minutes.llm.cache import DiskCache, ReplayStore
+    from minutes.llm.client import ThinClient
+
+    if settings.llm_mode == "live":
+        return ThinClient(cache=DiskCache(settings.data_dir / "cache" / "llm"))
+    return ThinClient(cache=ReplayStore(ROOT / "eval" / "gate" / "llm.jsonl.gz"))

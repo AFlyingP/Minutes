@@ -1,6 +1,7 @@
 import json
 import os
 import re
+import shutil
 import sys
 from datetime import datetime
 from io import TextIOWrapper
@@ -34,6 +35,7 @@ from minutes.labels.rules import PRODUCTION_RULES, check
 from minutes.labels.schema import LabelIn, LabelType
 from minutes.log import bind_correlation_id, configure_logging, get_logger, new_correlation_id
 from minutes.retrieval.search import Filters, city_names, hit_heading, search, span_label
+from minutes.tracing import configure_tracing
 
 EXIT_CODES: dict[type[MinutesError], int] = {
     ConfigError: 2,
@@ -69,12 +71,14 @@ jobs_app = typer.Typer(no_args_is_help=True)
 fixtures_app = typer.Typer(no_args_is_help=True)
 corpus_app = typer.Typer(no_args_is_help=True)
 labels_app = typer.Typer(no_args_is_help=True)
+cache_app = typer.Typer(no_args_is_help=True)
 app.add_typer(ingest_app, name="ingest")
 app.add_typer(worker_app, name="worker")
 app.add_typer(jobs_app, name="jobs")
 app.add_typer(fixtures_app, name="fixtures")
 app.add_typer(corpus_app, name="corpus")
 app.add_typer(labels_app, name="labels")
+app.add_typer(cache_app, name="cache")
 
 LABELS_DIR = Path("eval/labels")
 LABEL_RULES = PRODUCTION_RULES
@@ -88,6 +92,18 @@ def main() -> None:
             stream.reconfigure(encoding="utf-8")
     configure_logging(get_settings().log_level)
     bind_correlation_id(new_correlation_id())
+    configure_tracing()
+
+
+@cache_app.command("clear")
+def cache_clear(
+    kind: Annotated[Literal["llm", "embed", "rerank"], typer.Option("--kind")],
+) -> None:
+    """Remove one model cache directory."""
+    path = get_settings().data_dir / "cache" / kind
+    if path.exists():
+        shutil.rmtree(path)
+    typer.echo(f"cleared {kind}")
 
 
 def report(results: list[probe.ProbeResult]) -> None:
