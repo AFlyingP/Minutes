@@ -21,6 +21,7 @@ from minutes.errors import (
     ValidationError,
 )
 from minutes.log import bind_correlation_id, get_logger, new_correlation_id
+from minutes.tracing import configure_tracing
 
 CORRELATION_HEADER = "X-Correlation-ID"
 CORRELATION_ID = re.compile(r"^[0-9a-f]{32}$")
@@ -43,6 +44,7 @@ log = get_logger("api")
 
 
 def create_app() -> FastAPI:
+    configure_tracing()
     app = FastAPI(title="Minutes")
     app.include_router(routes_core.router)
     app.include_router(routes_docs.router)
