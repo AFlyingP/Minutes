@@ -6,6 +6,7 @@ import psycopg
 from psycopg.rows import TupleRow
 
 from minutes.errors import ValidationError
+from minutes.models import get_embedder
 
 CANDIDATES = 50
 
@@ -27,6 +28,23 @@ WHERE q.tsq IS NOT NULL AND c.tsv @@ q.tsq
   AND (%(body)s::text IS NULL OR c.body = %(body)s)
   AND (%(kind)s::text IS NULL OR c.doc_kind = %(kind)s)
 ORDER BY score DESC, c.id ASC
+LIMIT %(limit)s
+"""
+
+VECTOR_QUERY = """
+SELECT c.id, 1 - (c.embedding <=> %(qvec)s::vector) AS score,
+       c.item_id, c.document_id, c.unit_index, u.unit_kind, c.start_offset,
+       c.end_offset, c.text, c.city_id, c.body, c.meeting_date, c.doc_kind, u.start_ms
+FROM chunks c
+JOIN units u ON u.document_id = c.document_id AND u.unit_index = c.unit_index
+WHERE c.embedding IS NOT NULL
+  AND c.chunker = %(chunker)s
+  AND (%(city)s::text IS NULL OR c.city_id = %(city)s)
+  AND (%(date_from)s::date IS NULL OR c.meeting_date >= %(date_from)s)
+  AND (%(date_to)s::date IS NULL OR c.meeting_date <= %(date_to)s)
+  AND (%(body)s::text IS NULL OR c.body = %(body)s)
+  AND (%(kind)s::text IS NULL OR c.doc_kind = %(kind)s)
+ORDER BY c.embedding <=> %(qvec)s::vector ASC, c.id ASC
 LIMIT %(limit)s
 """
 
@@ -102,12 +120,18 @@ def search(
         raise ValidationError("q: must be 1 to 500 characters")
     if not 1 <= k <= 50:
         raise ValidationError("k: must be between 1 and 50")
-    if mode != "keyword":
+    if mode not in ("keyword", "vector"):
         raise ValidationError(f"mode {mode} is not available")
     if chunker != "fixed":
         raise ValidationError(f"chunker {chunker} is not available")
     params = {**asdict(filters), "query": query, "chunker": chunker, "limit": CANDIDATES}
-    rows = conn.execute(KEYWORD_QUERY, params).fetchall()
+    if mode == "keyword":
+        rows = conn.execute(KEYWORD_QUERY, params).fetchall()
+    else:
+        conn.execute("SET LOCAL hnsw.ef_search = 100")
+        conn.execute("SET LOCAL hnsw.iterative_scan = strict_order")
+        qvec = get_embedder().embed_query(query)
+        rows = conn.execute(VECTOR_QUERY, {**params, "qvec": qvec}).fetchall()
     hits = []
     for rank, row in enumerate(rows[:k], start=1):
         chunk_id, score, item_id, document_id, unit_index, unit_kind, start, end, text = row[:9]
