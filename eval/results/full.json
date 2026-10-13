@@ -1,0 +1,205 @@
+{
+  "corpus": {
+    "cities": 2,
+    "documents": 854,
+    "pages": 5966,
+    "per_city": {
+      "lincoln": {
+        "documents": 246,
+        "ocr_pages": 796,
+        "pages": 3004,
+        "parse_quality": 0.9309,
+        "segments": 10143
+      },
+      "seattle": {
+        "documents": 608,
+        "ocr_pages": 0,
+        "pages": 2962,
+        "parse_quality": 0.978,
+        "segments": 21552
+      }
+    },
+    "segments": 31695
+  },
+  "generated_utc": "2026-10-13T00:10:01Z",
+  "git_commit": "b12e656bc771d97772bd359249983265e88d32cc",
+  "labels": {
+    "agenda_count": 20,
+    "agent_task": 20,
+    "authors": {
+      "agent": 320,
+      "human": 0
+    },
+    "extraction": 220,
+    "human_reviewed": {
+      "agenda_count": 0,
+      "agent_task": 0,
+      "extraction": 0,
+      "question": 0
+    },
+    "question": 60
+  },
+  "retrieval": {
+    "fixed": {
+      "keyword": {
+        "recall_at_10": 0.3229,
+        "recall_at_20": 0.4583,
+        "recall_at_5": 0.2188
+      },
+      "vector": {
+        "recall_at_10": 0.4062,
+        "recall_at_20": 0.4792,
+        "recall_at_5": 0.3854
+      }
+    },
+    "latency_ms": {
+      "keyword": {
+        "p50": 536.9731,
+        "p95": 1169.0761
+      },
+      "vector": {
+        "p50": 10.1887,
+        "p95": 29.8161
+      }
+    }
+  },
+  "segmentation": {
+    "overall": {
+      "exact_rate": 0.15,
+      "mae": 7.6
+    },
+    "per_city": {
+      "lincoln": {
+        "exact_rate": 0.1,
+        "mae": 5.5
+      },
+      "seattle": {
+        "exact_rate": 0.2,
+        "mae": 9.7
+      }
+    },
+    "per_meeting": [
+      {
+        "gold": 0,
+        "meeting_id": "lincoln-1591",
+        "pred": 0,
+        "signed_error": 0
+      },
+      {
+        "gold": 3,
+        "meeting_id": "lincoln-1615",
+        "pred": 0,
+        "signed_error": -3
+      },
+      {
+        "gold": 1,
+        "meeting_id": "lincoln-1807",
+        "pred": 0,
+        "signed_error": -1
+      },
+      {
+        "gold": 1,
+        "meeting_id": "lincoln-1903",
+        "pred": 0,
+        "signed_error": -1
+      },
+      {
+        "gold": 2,
+        "meeting_id": "lincoln-2005",
+        "pred": 0,
+        "signed_error": -2
+      },
+      {
+        "gold": 7,
+        "meeting_id": "lincoln-2060",
+        "pred": 0,
+        "signed_error": -7
+      },
+      {
+        "gold": 8,
+        "meeting_id": "lincoln-2080",
+        "pred": 0,
+        "signed_error": -8
+      },
+      {
+        "gold": 3,
+        "meeting_id": "lincoln-2105",
+        "pred": 0,
+        "signed_error": -3
+      },
+      {
+        "gold": 18,
+        "meeting_id": "lincoln-2121",
+        "pred": 0,
+        "signed_error": -18
+      },
+      {
+        "gold": 12,
+        "meeting_id": "lincoln-2146",
+        "pred": 0,
+        "signed_error": -12
+      },
+      {
+        "gold": 35,
+        "meeting_id": "seattle-5497",
+        "pred": 0,
+        "signed_error": -35
+      },
+      {
+        "gold": 7,
+        "meeting_id": "seattle-5515",
+        "pred": 0,
+        "signed_error": -7
+      },
+      {
+        "gold": 3,
+        "meeting_id": "seattle-5530",
+        "pred": 0,
+        "signed_error": -3
+      },
+      {
+        "gold": 0,
+        "meeting_id": "seattle-5582",
+        "pred": 0,
+        "signed_error": 0
+      },
+      {
+        "gold": 5,
+        "meeting_id": "seattle-5766",
+        "pred": 0,
+        "signed_error": -5
+      },
+      {
+        "gold": 5,
+        "meeting_id": "seattle-5773",
+        "pred": 0,
+        "signed_error": -5
+      },
+      {
+        "gold": 1,
+        "meeting_id": "seattle-5843",
+        "pred": 0,
+        "signed_error": -1
+      },
+      {
+        "gold": 0,
+        "meeting_id": "seattle-6055",
+        "pred": 0,
+        "signed_error": 0
+      },
+      {
+        "gold": 24,
+        "meeting_id": "seattle-6155",
+        "pred": 0,
+        "signed_error": -24
+      },
+      {
+        "gold": 17,
+        "meeting_id": "seattle-6413",
+        "pred": 0,
+        "signed_error": -17
+      }
+    ]
+  },
+  "suite": "full"
+}
