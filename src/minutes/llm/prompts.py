@@ -65,6 +65,20 @@ Question: {question}
 Sources:
 {sources}"""
 
+JUDGE_USER = """\
+{blocks}"""
+
+GRADE_ANSWER_SYSTEM = """\
+You grade an answer to a question against a reference answer. The answer is correct when it states the same fact as the reference answer and does not contradict it. Extra detail is allowed. An answer that declines or says the information is not available is incorrect. Reply with JSON only."""
+
+GRADE_ANSWER_USER = """\
+Question: {question}
+Reference answer: {reference}
+Answer to grade: {answer}"""
+
+GRADE_SUPPORT_SYSTEM = """\
+You audit citations. For each numbered sentence, decide whether it is fully supported by its own cited source text alone. A claim that is not in the sources, or that the sources contradict, makes the sentence unsupported. Counting listed names is allowed. Give one verdict per sentence, using the sentence numbers given. Reply with JSON only."""
+
 SYNTH_SCHEMA: dict[str, object] = {
     "type": "object",
     "properties": {
@@ -83,6 +97,33 @@ SYNTH_SCHEMA: dict[str, object] = {
         },
     },
     "required": ["decline", "sentences"],
+    "additionalProperties": False,
+}
+
+SUPPORTED_SCHEMA: dict[str, object] = {
+    "type": "object",
+    "properties": {
+        "verdicts": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "sentence": {"type": "integer"},
+                    "supported": {"type": "boolean"},
+                },
+                "required": ["sentence", "supported"],
+                "additionalProperties": False,
+            },
+        }
+    },
+    "required": ["verdicts"],
+    "additionalProperties": False,
+}
+
+CORRECT_SCHEMA: dict[str, object] = {
+    "type": "object",
+    "properties": {"correct": {"type": "boolean"}},
+    "required": ["correct"],
     "additionalProperties": False,
 }
 

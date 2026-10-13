@@ -12,7 +12,9 @@ from minutes.llm import Budget, ChatResult
 from minutes.llm.cache import cache_key
 from minutes.llm.client import PER_CALL_CEILINGS, record_completed_call
 from minutes.llm.prices import cost_usd, estimate_usd
+from minutes.llm.prompts import CORRECT_SCHEMA, SUPPORTED_SCHEMA
 from minutes.log import get_correlation_id
+from minutes.models.stubs import stub_tokens
 from minutes.tracing import llm_span
 
 VOTE_LABELS = ("In Favor:", "Opposed:", "Ayes:", "Noes:", "Nays:", "Abstain:", "Absent:")
@@ -30,6 +32,11 @@ AMOUNT = re.compile(r"\$\d[\d,]*(?:\.\d+)?")
 MOTION = re.compile(
     r"(?:Councilmember|Commissioner) (\w+) motioned to (\w+), motion was seconded by"
     r"\s+(?:Councilmember|Commissioner)\s+(\w+)"
+)
+GRADE_SENTENCE = re.compile(
+    r"(?:^|\n\n)Sentence (?P<number>\d+): (?P<sentence>.*?)\n"
+    r"Sources for sentence (?P=number):\n(?P<sources>.*?)(?=\n\nSentence \d+: |\Z)",
+    re.S,
 )
 _quota_fault = ""
 _quota_calls = 0
@@ -122,6 +129,24 @@ def _synth(user: str) -> dict[str, object]:
     return {"decline": False, "sentences": [{"text": start + ".", "citations": [1]}]}
 
 
+def _grade_support(user: str) -> dict[str, object]:
+    verdicts = []
+    for match in GRADE_SENTENCE.finditer(user):
+        sentence_tokens = set(stub_tokens(match["sentence"]))
+        source_tokens = set(stub_tokens(match["sources"]))
+        supported = not sentence_tokens or (
+            len(sentence_tokens & source_tokens) >= len(sentence_tokens) / 2
+        )
+        verdicts.append({"sentence": int(match["number"]), "supported": supported})
+    return {"verdicts": verdicts}
+
+
+def _grade_correct(user: str) -> dict[str, object]:
+    graded, answer = user.split("\nAnswer to grade: ", 1)
+    reference = graded.split("\nReference answer: ", 1)[1]
+    return {"correct": " ".join(reference.lower().split()) in " ".join(answer.lower().split())}
+
+
 class StubClient:
     def chat(
         self,
@@ -175,6 +200,10 @@ class StubClient:
             user = messages[-1]["content"]
             if purpose == "synth":
                 parsed = _synth(user)
+            elif purpose in ("judge", "grade") and schema == SUPPORTED_SCHEMA:
+                parsed = _grade_support(user)
+            elif purpose == "grade" and schema == CORRECT_SCHEMA:
+                parsed = _grade_correct(user)
             elif purpose == "extract":
                 parsed = _extract(user)
             else:
