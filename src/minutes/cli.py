@@ -6,7 +6,7 @@ import sys
 from datetime import datetime
 from io import TextIOWrapper
 from pathlib import Path
-from typing import Annotated, Any, Literal, NoReturn
+from typing import Annotated, Any, Literal, NoReturn, cast
 from urllib.parse import urlsplit
 
 import typer
@@ -29,6 +29,8 @@ from minutes.errors import (
     MinutesError,
     NotFoundError,
 )
+from minutes.evals import report as eval_report
+from minutes.evals import runner as eval_runner
 from minutes.ingest import pipeline, quality
 from minutes.labels import export, store
 from minutes.labels.rules import PRODUCTION_RULES, check
@@ -72,6 +74,7 @@ fixtures_app = typer.Typer(no_args_is_help=True)
 corpus_app = typer.Typer(no_args_is_help=True)
 labels_app = typer.Typer(no_args_is_help=True)
 cache_app = typer.Typer(no_args_is_help=True)
+eval_app = typer.Typer(no_args_is_help=True)
 app.add_typer(ingest_app, name="ingest")
 app.add_typer(worker_app, name="worker")
 app.add_typer(jobs_app, name="jobs")
@@ -79,9 +82,45 @@ app.add_typer(fixtures_app, name="fixtures")
 app.add_typer(corpus_app, name="corpus")
 app.add_typer(labels_app, name="labels")
 app.add_typer(cache_app, name="cache")
+app.add_typer(eval_app, name="eval")
 
 LABELS_DIR = Path("eval/labels")
 LABEL_RULES = PRODUCTION_RULES
+
+
+@eval_app.command("run")
+def eval_run(
+    suite: Annotated[Literal["gate", "full"], typer.Option("--suite")] = "gate",
+    controls: Annotated[Literal["on", "off"], typer.Option("--controls")] = "on",
+    only: Annotated[str | None, typer.Option("--only")] = None,
+    labels_dir: Annotated[Path, typer.Option("--labels-dir")] = Path("eval/labels"),
+    out: Annotated[Path | None, typer.Option("--out")] = None,
+) -> None:
+    """Run the registered evaluation sections and print their table."""
+    output = out or (
+        Path("eval/results/full.json") if suite == "full" else Path("data/gate_results.json")
+    )
+    selected = set(only.split(",")) if only is not None else None
+    results = eval_runner.run_suite(
+        suite,
+        controls=controls == "on",
+        labels_dir=labels_dir,
+        out_path=output,
+        only=selected,
+    )
+    typer.echo(eval_report.render_table(results), nl=False)
+
+
+@eval_app.command("report")
+def eval_report_command() -> None:
+    """Write the Markdown table from the full evaluation results file."""
+    results_path = Path("eval/results/full.json")
+    if not results_path.is_file():
+        raise NotFoundError("missing eval/results/full.json")
+    results = cast(dict[str, object], json.loads(results_path.read_text(encoding="utf-8")))
+    report_path = Path("eval/results/full.md")
+    report_path.write_text(eval_report.render_table(results), encoding="utf-8", newline="\n")
+    typer.echo(f"updated {report_path.as_posix()}")
 
 
 @app.callback()
