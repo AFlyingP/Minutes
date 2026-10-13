@@ -7,7 +7,7 @@ import psycopg
 from psycopg.rows import TupleRow
 
 from minutes.errors import LLMOutputError, ValidationError
-from minutes.llm import get_client
+from minutes.llm import ChatResult, get_client
 from minutes.llm.prompts import SYNTH_SCHEMA, SYNTH_SYSTEM, SourceSpan, synth_user
 from minutes.retrieval.search import Filters, Hit, Span, city_names, search, span_label
 
@@ -50,9 +50,23 @@ class AnswerResult:
     dropped_sentences: int
 
 
-def _declined(reason: str, pipeline: str, started: float, dropped: int = 0) -> AnswerResult:
+def _latency_ms(started: float, result: ChatResult | None) -> int:
     elapsed = int((time.perf_counter() - started) * 1000)
-    return AnswerResult(True, reason, [], [], pipeline, None, 0.0, elapsed, False, dropped)
+    # a reply from the development cache took no time now, so its original latency is added
+    return elapsed + (result.latency_ms if result is not None and result.cached else 0)
+
+
+def _declined(
+    reason: str,
+    pipeline: str,
+    started: float,
+    dropped: int = 0,
+    result: ChatResult | None = None,
+) -> AnswerResult:
+    model = result.model if result is not None else None
+    cost = result.cost_usd if result is not None else 0.0
+    latency = _latency_ms(started, result)
+    return AnswerResult(True, reason, [], [], pipeline, model, cost, latency, False, dropped)
 
 
 def _citation(number: int, hit: Hit, span: Span) -> Citation:
@@ -87,7 +101,7 @@ def answer(
     if pipeline != "baseline":
         raise ValidationError(f"pipeline {pipeline} is not available")
     started = time.perf_counter()
-    hits = search(conn, question, filters, mode="keyword", chunker="fixed", k=K)
+    hits = search(conn, question, filters, mode="vector", chunker="fixed", k=K)
     if not hits:
         return _declined("no_retrieval", pipeline, started)
     names = city_names(conn)
@@ -119,7 +133,7 @@ def answer(
         return _declined("model_error", pipeline, started)
     output: dict[str, Any] = result.parsed or {}
     if output["decline"]:
-        return _declined("model_declined", pipeline, started)
+        return _declined("model_declined", pipeline, started, result=result)
     kept = [
         s
         for s in output["sentences"]
@@ -127,7 +141,7 @@ def answer(
     ]
     dropped = len(output["sentences"]) - len(kept)
     if not kept:
-        return _declined("unsupported", pipeline, started, dropped)
+        return _declined("unsupported", pipeline, started, dropped, result)
     # sources are renumbered in the order the answer first uses them
     numbers: dict[int, int] = {}
     for sentence in kept:
@@ -143,7 +157,7 @@ def answer(
         pipeline=pipeline,
         model=result.model,
         cost_usd=result.cost_usd,
-        latency_ms=int((time.perf_counter() - started) * 1000),
+        latency_ms=_latency_ms(started, result),
         cached=False,
         dropped_sentences=dropped,
     )

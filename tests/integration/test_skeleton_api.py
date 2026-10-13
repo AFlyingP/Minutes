@@ -122,7 +122,9 @@ def test_extract_stage_writes_unverified_facts(
 
 
 def test_ask_declines_when_nothing_is_retrieved(client: TestClient) -> None:
-    body = client.post("/api/ask", json={"question": "zeppelin moorings"}).json()
+    body = client.post(
+        "/api/ask", json={"question": "zeppelin moorings", "date_from": "2030-01-01"}
+    ).json()
     assert body["declined"] is True
     assert body["decline_reason"] == "no_retrieval"
     assert body["decline_message"] == "I can't answer that from the indexed records."
@@ -144,7 +146,9 @@ def test_search_and_ask_commands_print_hits_and_citations(fixture_corpus: str) -
     answered = runner.invoke(
         app, ["ask", "Granite Works contract vote", "--city", "birch", "--pipeline", "baseline"]
     )
-    declined = runner.invoke(app, ["ask", "zeppelin moorings", "--pipeline", "baseline"])
+    declined = runner.invoke(
+        app, ["ask", "zeppelin moorings", "--pipeline", "baseline", "--date-from", "2030-01-01"]
+    )
     assert re.match(r"1 \d\.\d{3} birch-\w+-201 p\. \d Birch City Council, ", found.output)
     assert answered.stdout.splitlines() == [
         "The roll call vote was 9 ayes and 1 noes. [1]",

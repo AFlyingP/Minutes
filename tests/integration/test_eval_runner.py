@@ -102,10 +102,13 @@ def test_two_runs_differ_only_in_timestamp_and_commit(tmp_path: Path, fixture_co
         )
     first = cast(dict[str, object], json.loads(first_path.read_text(encoding="utf-8")))
     second = cast(dict[str, object], json.loads(second_path.read_text(encoding="utf-8")))
-    first.pop("generated_utc")
-    second.pop("generated_utc")
-    first.pop("git_commit")
-    second.pop("git_commit")
+    for results in (first, second):
+        results.pop("generated_utc")
+        results.pop("git_commit")
+        # answer latency is wall-clock time, so it is the one measured value that varies
+        answers = cast(dict[str, dict[str, object]], results["answers"])
+        for pipeline in answers.values():
+            pipeline.pop("latency_ms")
     assert first == second
 
 

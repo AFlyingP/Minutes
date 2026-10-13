@@ -29,6 +29,7 @@ from minutes.errors import (
     MinutesError,
     NotFoundError,
 )
+from minutes.evals import grader as eval_grader
 from minutes.evals import report as eval_report
 from minutes.evals import runner as eval_runner
 from minutes.ingest import pipeline, quality
@@ -85,6 +86,7 @@ app.add_typer(cache_app, name="cache")
 app.add_typer(eval_app, name="eval")
 
 LABELS_DIR = Path("eval/labels")
+RESULTS_FILE = Path("eval/results/full.json")
 LABEL_RULES = PRODUCTION_RULES
 
 
@@ -109,6 +111,26 @@ def eval_run(
         only=selected,
     )
     typer.echo(eval_report.render_table(results), nl=False)
+
+
+@eval_app.command("validate-grader")
+def eval_validate_grader() -> None:
+    """Measure grader agreement on cases derived from the evaluation labels."""
+    validation = eval_grader.validate(eval_runner.load_labels(LABELS_DIR))
+    scores = {"answer": validation.answer, "support": validation.support}
+    eval_runner.write_results(
+        RESULTS_FILE,
+        {
+            "grader": {
+                name: {"accuracy": score.accuracy, "kappa": score.kappa}
+                for name, score in scores.items()
+            }
+        },
+    )
+    for name, score in scores.items():
+        typer.echo(f"{name}_grader accuracy={score.accuracy:.3f} kappa={score.kappa:.3f}")
+    if any(score.accuracy < 0.90 or score.kappa < 0.80 for score in scores.values()):
+        raise typer.Exit(1)
 
 
 @eval_app.command("report")

@@ -11,13 +11,16 @@ import psycopg
 from psycopg.rows import TupleRow
 
 from minutes import corpus, db
+from minutes.answer.pipeline import answer as answer_question
 from minutes.config import Corpus, corpus_database_url, get_settings
 from minutes.errors import ValidationError
+from minutes.evals.grader import grade_answer, grade_support
 from minutes.evals.metrics import (
     mean_or_none,
     percentile,
     recall_for_question,
     segmentation_metrics,
+    summarize_runs,
 )
 from minutes.ingest import quality
 from minutes.labels import export, store
@@ -40,11 +43,19 @@ LABEL_TYPES: tuple[LabelType, ...] = ("question", "agenda_count", "extraction", 
 
 
 class EvalContext:
-    def __init__(self, suite: Suite, corpus_name: Corpus, conn: Connection, labels: Labels) -> None:
+    def __init__(
+        self,
+        suite: Suite,
+        corpus_name: Corpus,
+        conn: Connection,
+        labels: Labels,
+        controls: bool,
+    ) -> None:
         self.suite = suite
         self.corpus = corpus_name
         self.conn = conn
         self.labels = labels
+        self.controls = controls
 
 
 def load_labels(labels_dir: Path) -> Labels:
@@ -199,9 +210,84 @@ def _segmentation(context: EvalContext) -> Result:
     }
 
 
+def _answers(context: EvalContext) -> Result:
+    if context.suite != "full":
+        return {}
+    questions = _question_labels(context.labels)
+    answerable = [
+        (label, payload) for label, payload in questions if isinstance(payload, QuestionAnswerable)
+    ]
+    unanswerable = [
+        (label, payload)
+        for label, payload in questions
+        if isinstance(payload, QuestionUnanswerable)
+    ]
+    pipeline_results: Result = {}
+    for pipeline_name in ("baseline",):
+        answer_accuracy: list[float | None] = []
+        decline_accuracy: list[float | None] = []
+        false_decline_rate: list[float | None] = []
+        faithfulness: list[float | None] = []
+        sample_zero_latency: list[float] = []
+        for sample_index in range(5):
+            correct_answers = 0
+            declined_answerable = 0
+            declined_unanswerable = 0
+            supported_sentences = 0
+            sentence_count = 0
+            for label, payload in questions:
+                result = answer_question(
+                    context.conn,
+                    payload.question,
+                    Filters(city=label.city),
+                    pipeline=pipeline_name,
+                    controls=context.controls,
+                    sample_index=sample_index,
+                )
+                if sample_index == 0:
+                    sample_zero_latency.append(float(result.latency_ms))
+                if not result.declined:
+                    citation_texts = {
+                        citation.number: citation.quote for citation in result.citations
+                    }
+                    support_inputs = [
+                        (sentence.text, [citation_texts[number] for number in sentence.citations])
+                        for sentence in result.sentences
+                    ]
+                    support_results = grade_support(support_inputs, sample_index)
+                    supported_sentences += sum(support_results)
+                    sentence_count += len(support_results)
+                if isinstance(payload, QuestionAnswerable):
+                    if result.declined:
+                        declined_answerable += 1
+                        continue
+                    answer_text = " ".join(sentence.text for sentence in result.sentences)
+                    correct_answers += grade_answer(label, answer_text, sample_index)
+                elif result.declined:
+                    declined_unanswerable += 1
+            answer_accuracy.append(correct_answers / len(answerable) if answerable else None)
+            decline_accuracy.append(
+                declined_unanswerable / len(unanswerable) if unanswerable else None
+            )
+            false_decline_rate.append(declined_answerable / len(answerable) if answerable else None)
+            faithfulness.append(supported_sentences / sentence_count if sentence_count else None)
+        pipeline_results[pipeline_name] = {
+            "answer_accuracy": summarize_runs(answer_accuracy),
+            "decline_accuracy": summarize_runs(decline_accuracy),
+            "false_decline_rate": summarize_runs(false_decline_rate),
+            "faithfulness": summarize_runs(faithfulness),
+            "latency_ms": {
+                "p50": percentile(sample_zero_latency, 50) if sample_zero_latency else None,
+                "p95": percentile(sample_zero_latency, 95) if sample_zero_latency else None,
+            },
+        }
+    return pipeline_results
+
+
 SECTIONS: dict[str, Callable[[EvalContext], Result]] = {
     "retrieval": _retrieval,
     "segmentation": _segmentation,
+    "answers": _answers,
 }
 
 
@@ -226,6 +312,21 @@ def _round_values(value: object, in_cost: bool = False) -> object:
     return value
 
 
+def write_results(out_path: Path, blocks: dict[str, object]) -> dict[str, object]:
+    """Merge blocks into the results file and return what was written."""
+    existing: dict[str, object] = {}
+    if out_path.exists():
+        existing = cast(dict[str, object], json.loads(out_path.read_text(encoding="utf-8")))
+    results = cast(dict[str, object], _round_values({**existing, **blocks}))
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_text(
+        json.dumps(results, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+        newline="\n",
+    )
+    return results
+
+
 def run_suite(
     suite: Suite,
     *,
@@ -243,13 +344,9 @@ def run_suite(
     if settings.corpus != "fixture":
         store.require_frozen()
     labels = load_labels(labels_dir)
-    existing: dict[str, object] = {}
-    if out_path.exists():
-        existing = cast(dict[str, object], json.loads(out_path.read_text(encoding="utf-8")))
     with db.connect(corpus_database_url(settings.corpus)) as conn:
-        context = EvalContext(suite, settings.corpus, conn, labels)
-        results = {
-            **existing,
+        context = EvalContext(suite, settings.corpus, conn, labels, controls)
+        results: dict[str, object] = {
             "suite": suite,
             "generated_utc": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
             "git_commit": _git_commit(),
@@ -258,11 +355,4 @@ def run_suite(
         }
         for name in names:
             results[name] = SECTIONS[name](context)
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-    serialized = _round_values(results)
-    out_path.write_text(
-        json.dumps(serialized, indent=2, sort_keys=True) + "\n",
-        encoding="utf-8",
-        newline="\n",
-    )
-    return cast(dict[str, object], serialized)
+    return write_results(out_path, results)
