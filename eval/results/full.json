@@ -1,4 +1,36 @@
 {
+  "answers": {
+    "baseline": {
+      "answer_accuracy": {
+        "max": 0.4375,
+        "median": 0.4375,
+        "min": 0.4375,
+        "runs": 5
+      },
+      "decline_accuracy": {
+        "max": 0.75,
+        "median": 0.75,
+        "min": 0.75,
+        "runs": 5
+      },
+      "faithfulness": {
+        "max": 0.9643,
+        "median": 0.9286,
+        "min": 0.9286,
+        "runs": 5
+      },
+      "false_decline_rate": {
+        "max": 0.5,
+        "median": 0.5,
+        "min": 0.5,
+        "runs": 5
+      },
+      "latency_ms": {
+        "p50": 3745.0,
+        "p95": 5506.0
+      }
+    }
+  },
   "corpus": {
     "cities": 2,
     "documents": 854,
@@ -21,8 +53,18 @@
     },
     "segments": 31695
   },
-  "generated_utc": "2026-10-13T00:10:01Z",
-  "git_commit": "b12e656bc771d97772bd359249983265e88d32cc",
+  "generated_utc": "2026-10-14T22:57:04Z",
+  "git_commit": "42d52afa228126211db6ef6c2f775a175c5c7efb",
+  "grader": {
+    "answer": {
+      "accuracy": 1.0,
+      "kappa": 1.0
+    },
+    "support": {
+      "accuracy": 1.0,
+      "kappa": 1.0
+    }
+  },
   "labels": {
     "agenda_count": 20,
     "agent_task": 20,

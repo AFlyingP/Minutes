@@ -13,10 +13,10 @@
 | agenda segmentation exact count | 0.15 | n/a | full |
 | agenda segmentation mean absolute error | 7.6 | n/a | full |
 | extraction accuracy | n/a | n/a | full |
-| answer accuracy baseline | n/a | n/a | full |
+| answer accuracy baseline | 0.4375 | 5 (0.4375 / 0.4375 / 0.4375) | full |
 | answer accuracy final | n/a | n/a | full |
 | answer accuracy LangGraph | n/a | n/a | full |
-| faithfulness baseline | n/a | n/a | full |
+| faithfulness baseline | 0.9286 | 5 (0.9286 / 0.9286 / 0.9643) | full |
 | faithfulness final | n/a | n/a | full |
 | decline accuracy final | n/a | n/a | full |
 | agent task completion | n/a | n/a | full |
@@ -33,8 +33,8 @@
 | Qdrant ANN recall@10 | n/a | n/a | full |
 | Qdrant ANN p50 | n/a | n/a | full |
 | Qdrant ANN p95 | n/a | n/a | full |
-| answer grader agreement | n/a | n/a | full |
-| support grader agreement | n/a | n/a | full |
+| answer grader agreement | 1 | n/a | full |
+| support grader agreement | 1 | n/a | full |
 | labels written by an automated pass | 320 | n/a | full |
 | labels written by a human | 0 | n/a | full |
 | labels reviewed by a human | 0 | n/a | full |
