@@ -82,8 +82,6 @@ export function search(q: string, filters: Params): Promise<SearchResponse> {
   return getJson<SearchResponse>("/api/search", {
     q,
     ...filters,
-    mode: "keyword",
-    chunker: "fixed",
     k: "10",
   });
 }

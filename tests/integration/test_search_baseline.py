@@ -53,7 +53,8 @@ def test_vector_and_keyword_modes_available_over_http(fixture_corpus: str) -> No
     assert vector.json()["hits"]
     assert keyword.status_code == 200
     assert keyword.json()["hits"]
-    assert hybrid.status_code == 422
+    assert hybrid.status_code == 200
+    assert hybrid.json()["hits"]
 
 
 def test_vector_search_finds_sidewalk_chunk(fixture_corpus: str, conn: Connection) -> None:

@@ -102,6 +102,9 @@ test("submits the query with filters and renders hits", async () => {
   const url = fetchMock.mock.calls[1][0];
   expect(url).toMatch(/q=sidewalk(\+|%20)repair/);
   expect(url).toContain("city=birch");
+  expect(new URL(url, "http://localhost").searchParams.has("mode")).toBe(false);
+  expect(new URL(url, "http://localhost").searchParams.has("chunker")).toBe(false);
+  expect(new URL(url, "http://localhost").searchParams.get("k")).toBe("10");
   expect(result).toHaveTextContent("Birch City Council, 2024-03-12, minutes, item 9.B");
   const span = screen.getByTestId("result-span");
   expect(span).toHaveTextContent("p. 1");

@@ -95,9 +95,9 @@ def search_endpoint(
     date_from: date | None = None,
     date_to: date | None = None,
     kind: DocKind | None = None,
-    mode: SearchMode = "keyword",
+    mode: SearchMode = "hybrid_rerank",
     k: Annotated[int, Query(ge=1, le=50)] = 10,
-    chunker: Chunker = "fixed",
+    chunker: Chunker = "item",
 ) -> SearchOut:
     filters = checked_filters(conn, city, body, date_from, date_to, kind)
     hits = search(conn, q.strip(), filters, mode=mode, chunker=chunker, k=k)

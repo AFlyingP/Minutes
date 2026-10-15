@@ -43,7 +43,7 @@ def test_cities_lists_alder_and_birch_with_bodies(client: TestClient) -> None:
 
 
 def test_search_filters_by_city_and_date(client: TestClient) -> None:
-    params = {"q": "sidewalk", "city": "birch"}
+    params = {"q": "sidewalk", "city": "birch", "mode": "keyword"}
     late = client.get("/api/search", params={**params, "date_from": "2024-04-01"}).json()
     hits = client.get("/api/search", params=params).json()["hits"]
     assert late["hits"] == []

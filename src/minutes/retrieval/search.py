@@ -6,7 +6,7 @@ import psycopg
 from psycopg.rows import TupleRow
 
 from minutes.errors import ValidationError
-from minutes.models import get_embedder
+from minutes.models import get_embedder, get_reranker
 
 CANDIDATES = 50
 
@@ -15,11 +15,8 @@ KEYWORD_QUERY = """
 WITH q AS (
   SELECT NULLIF(replace(plainto_tsquery('english', %(query)s)::text, '&', '|'), '')::tsquery AS tsq
 )
-SELECT c.id, ts_rank_cd(c.tsv, q.tsq, 32) AS score, c.item_id, c.document_id, c.unit_index,
-       u.unit_kind, c.start_offset, c.end_offset, c.text, c.city_id, c.body, c.meeting_date,
-       c.doc_kind, u.start_ms
-FROM chunks c
-JOIN units u ON u.document_id = c.document_id AND u.unit_index = c.unit_index, q
+SELECT c.id, ts_rank_cd(c.tsv, q.tsq, 32) AS score
+FROM chunks c, q
 WHERE q.tsq IS NOT NULL AND c.tsv @@ q.tsq
   AND c.chunker = %(chunker)s
   AND (%(city)s::text IS NULL OR c.city_id = %(city)s)
@@ -32,11 +29,8 @@ LIMIT %(limit)s
 """
 
 VECTOR_QUERY = """
-SELECT c.id, 1 - (c.embedding <=> %(qvec)s::vector) AS score,
-       c.item_id, c.document_id, c.unit_index, u.unit_kind, c.start_offset,
-       c.end_offset, c.text, c.city_id, c.body, c.meeting_date, c.doc_kind, u.start_ms
+SELECT c.id, 1 - (c.embedding <=> %(qvec)s::vector) AS score
 FROM chunks c
-JOIN units u ON u.document_id = c.document_id AND u.unit_index = c.unit_index
 WHERE c.embedding IS NOT NULL
   AND c.chunker = %(chunker)s
   AND (%(city)s::text IS NULL OR c.city_id = %(city)s)
@@ -47,6 +41,25 @@ WHERE c.embedding IS NOT NULL
 ORDER BY c.embedding <=> %(qvec)s::vector ASC, c.id ASC
 LIMIT %(limit)s
 """
+
+CHUNK_ROWS = """
+SELECT c.id, c.document_id, c.unit_index, u.unit_kind, c.start_offset, c.end_offset,
+       c.text, c.item_id, c.city_id, c.body, c.meeting_date, c.doc_kind, u.start_ms,
+       i.identifier, i.title
+FROM chunks c
+LEFT JOIN items i ON i.id = c.item_id
+JOIN units u ON u.document_id = c.document_id AND u.unit_index = c.unit_index
+WHERE c.id = ANY(%s)
+"""
+
+
+def rrf(lists: list[list[int]], c: int = 60) -> list[tuple[int, float]]:
+    """Fuse ranked lists by reciprocal rank, breaking ties by ID."""
+    scores: dict[int, float] = {}
+    for ids in lists:
+        for rank, chunk_id in enumerate(ids, start=1):
+            scores[chunk_id] = scores.get(chunk_id, 0.0) + 1 / (c + rank)
+    return sorted(scores.items(), key=lambda pair: (-pair[1], pair[0]))
 
 
 @dataclass(frozen=True)
@@ -120,38 +133,61 @@ def search(
         raise ValidationError("q: must be 1 to 500 characters")
     if not 1 <= k <= 50:
         raise ValidationError("k: must be between 1 and 50")
-    if mode not in ("keyword", "vector"):
+    if mode not in ("keyword", "vector", "hybrid", "hybrid_rerank"):
         raise ValidationError(f"mode {mode} is not available")
-    if chunker != "fixed":
+    if chunker not in ("fixed", "item"):
         raise ValidationError(f"chunker {chunker} is not available")
     params = {**asdict(filters), "query": query, "chunker": chunker, "limit": CANDIDATES}
-    if mode == "keyword":
-        rows = conn.execute(KEYWORD_QUERY, params).fetchall()
-    else:
+    keyword = []
+    vector = []
+    if mode != "vector":
+        keyword = conn.execute(KEYWORD_QUERY, params).fetchall()
+    if mode != "keyword":
         conn.execute("SET LOCAL hnsw.ef_search = 100")
         conn.execute("SET LOCAL hnsw.iterative_scan = strict_order")
         qvec = get_embedder().embed_query(query)
-        rows = conn.execute(VECTOR_QUERY, {**params, "qvec": qvec}).fetchall()
-    hits = []
-    for rank, row in enumerate(rows[:k], start=1):
-        chunk_id, score, item_id, document_id, unit_index, unit_kind, start, end, text = row[:9]
-        city_id, body, meeting_date, doc_kind, start_ms = row[9:]
-        span = Span(chunk_id, document_id, unit_index, unit_kind, start, end, text)
+        vector = conn.execute(VECTOR_QUERY, {**params, "qvec": qvec}).fetchall()
+    if mode == "keyword":
+        ranked = [(row[0], float(row[1])) for row in keyword]
+    elif mode == "vector":
+        ranked = [(row[0], float(row[1])) for row in vector]
+    else:
+        ranked = rrf([[row[0] for row in keyword], [row[0] for row in vector]])
+        if mode == "hybrid_rerank":
+            ranked = ranked[:CANDIDATES]
+    if not ranked:
+        return []
+    rows = conn.execute(CHUNK_ROWS, ([chunk_id for chunk_id, _ in ranked],)).fetchall()
+    chunks = {row[0]: row for row in rows}
+    if mode == "hybrid_rerank":
+        scores = get_reranker().score(query, [chunks[chunk_id][6] for chunk_id, _ in ranked])
+        ranked = sorted(
+            [(candidate[0], score) for candidate, score in zip(ranked, scores, strict=True)],
+            key=lambda pair: (-pair[1], pair[0]),
+        )
+    hits: list[Hit] = []
+    for chunk_id, score in ranked:
+        row = chunks[chunk_id]
+        item_id, city_id, body, meeting_date, doc_kind, start_ms = row[7:13]
+        identifier, title = row[13:]
+        spans = [Span(*row[:7])]
         hits.append(
             Hit(
-                rank=rank,
+                rank=len(hits) + 1,
                 score=float(score),
                 chunk_id=chunk_id,
                 item_id=item_id,
-                document_id=document_id,
+                document_id=row[1],
                 city_id=city_id,
                 body=body,
                 meeting_date=meeting_date,
                 doc_kind=doc_kind,
-                item_identifier=None,
-                item_title=None,
+                item_identifier=identifier,
+                item_title=title,
                 start_ms=start_ms,
-                spans=[span],
+                spans=spans,
             )
         )
+        if len(hits) == k:
+            break
     return hits

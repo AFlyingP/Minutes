@@ -38,7 +38,8 @@ Labels = list[Label]
 Connection = psycopg.Connection[TupleRow]
 Result = dict[str, object]
 Suite = Literal["gate", "full"]
-Mode = Literal["keyword", "vector"]
+Mode = Literal["keyword", "vector", "hybrid", "hybrid_rerank"]
+Chunker = Literal["fixed", "item"]
 LABEL_TYPES: tuple[LabelType, ...] = ("question", "agenda_count", "extraction", "agent_task")
 
 
@@ -119,13 +120,15 @@ def _question_labels(
     return questions
 
 
-def _search(context: EvalContext, label: Label, query: str, mode: Mode, k: int) -> list[Hit]:
+def _search(
+    context: EvalContext, label: Label, query: str, mode: Mode, chunker: Chunker, k: int
+) -> list[Hit]:
     return search(
         context.conn,
         query,
         Filters(city=label.city),
         mode=mode,
-        chunker="fixed",
+        chunker=chunker,
         k=k,
     )
 
@@ -135,29 +138,35 @@ def _retrieval(context: EvalContext) -> Result:
     answerable = [
         (label, payload) for label, payload in questions if isinstance(payload, QuestionAnswerable)
     ]
-    result: Result = {"fixed": {}}
-    fixed = cast(dict[str, object], result["fixed"])
+    result: Result = {}
     latency: dict[str, object] = {}
-    for mode in ("keyword", "vector"):
-        values: dict[int, list[float | None]] = {5: [], 10: [], 20: []}
-        for label, payload in answerable:
-            hits = _search(context, label, payload.question, mode, 20)
-            for k in values:
-                values[k].append(recall_for_question(payload.passages, hits, k))
-        fixed[mode] = {f"recall_at_{k}": mean_or_none(scores) for k, scores in values.items()}
-        if context.suite == "full" and context.corpus == "full":
-            for label, question_payload in questions[:10]:
-                _search(context, label, question_payload.question, mode, 20)
-            timings = []
-            for _ in range(5):
-                for label, question_payload in questions:
-                    start = perf_counter()
-                    _search(context, label, question_payload.question, mode, 20)
-                    timings.append((perf_counter() - start) * 1000)
-            latency[mode] = {
-                "p50": percentile(timings, 50),
-                "p95": percentile(timings, 95),
-            }
+    modes: dict[Chunker, tuple[Mode, ...]] = {
+        "fixed": ("keyword", "vector"),
+        "item": ("keyword", "vector", "hybrid", "hybrid_rerank"),
+    }
+    for chunker, chunker_modes in modes.items():
+        results: Result = {}
+        result[chunker] = results
+        for mode in chunker_modes:
+            values: dict[int, list[float | None]] = {5: [], 10: [], 20: []}
+            for label, payload in answerable:
+                hits = _search(context, label, payload.question, mode, chunker, 20)
+                for k in values:
+                    values[k].append(recall_for_question(payload.passages, hits, k))
+            results[mode] = {f"recall_at_{k}": mean_or_none(scores) for k, scores in values.items()}
+            if chunker == "item" and context.suite == "full" and context.corpus == "full":
+                for label, question_payload in questions[:10]:
+                    _search(context, label, question_payload.question, mode, chunker, 20)
+                timings = []
+                for _ in range(5):
+                    for label, question_payload in questions:
+                        start = perf_counter()
+                        _search(context, label, question_payload.question, mode, chunker, 20)
+                        timings.append((perf_counter() - start) * 1000)
+                latency[mode] = {
+                    "p50": percentile(timings, 50),
+                    "p95": percentile(timings, 95),
+                }
     if latency:
         result["latency_ms"] = latency
     return result
