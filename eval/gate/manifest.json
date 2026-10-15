@@ -3,17 +3,17 @@
     "documents": 90,
     "embeddings": 4542,
     "llm": 0,
-    "rerank": 0,
+    "rerank": 2280,
     "units": 2337
   },
   "files": {
     "embeddings.npz": "1b84c20bc6065efb743391db8686fe08dd0b6a499647994189e6459e7e6fbd66",
     "llm.jsonl.gz": "7c5082d4337a849ba470c859aa261c7cd94f028f281b231926cf85faaabf9987",
-    "rerank.jsonl.gz": "4683c8bd8d92188b2dd9e84931f0d096031b90c5c831300c802dc0a96f51e1de",
+    "rerank.jsonl.gz": "ccf0442597d8c0671bbefca89b083e7b59913fd8bf05ebd949c3bb0da5b47289",
     "snapshot.jsonl.gz": "8e1ec205eebe5de24764e855de466b6a0cc3f43c7bd7aab3b3f1a18652e76708"
   },
-  "git_commit": "177bc7d63acadca3918f96eceb208e0330a24867",
-  "recorded_utc": "2026-10-15T19:50:03Z",
+  "git_commit": "db07299936f3aca6c9df1c5c8dde98659f1192c9",
+  "recorded_utc": "2026-10-15T20:55:24Z",
   "stage_versions": {
     "chunk": 2,
     "embed": 1,

@@ -3,13 +3,13 @@
 | documents | 854 | n/a | full |
 | pages | 5966 | n/a | full |
 | cities | 2 | n/a | full |
-| recall@10 keyword | n/a | n/a | full |
-| recall@10 vector | n/a | n/a | full |
-| recall@10 hybrid | n/a | n/a | full |
-| recall@10 hybrid + reranker | n/a | n/a | full |
-| recall@5 hybrid + reranker | n/a | n/a | full |
-| recall@20 hybrid + reranker | n/a | n/a | full |
-| recall@10 fixed-size chunks, vector | 0.4062 | n/a | full |
+| recall@10 keyword | 0.4167 | n/a | full |
+| recall@10 vector | 0.7708 | n/a | full |
+| recall@10 hybrid | 0.7708 | n/a | full |
+| recall@10 hybrid + reranker | 0.8542 | n/a | full |
+| recall@5 hybrid + reranker | 0.8333 | n/a | full |
+| recall@20 hybrid + reranker | 0.8958 | n/a | full |
+| recall@10 fixed-size chunks, vector | 0.4167 | n/a | full |
 | agenda segmentation exact count | 1 | n/a | full |
 | agenda segmentation mean absolute error | 0 | n/a | full |
 | extraction accuracy | n/a | n/a | full |

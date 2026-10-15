@@ -1,7 +1,8 @@
 {
-  "git_commit": "f2b37b702998c77c8446fefb65c16ca1280e6b97",
+  "git_commit": "db07299936f3aca6c9df1c5c8dde98659f1192c9",
   "metrics": {
+    "recall_at_10": 0.9583,
     "segmentation_exact_rate": 1.0
   },
-  "written_utc": "2026-10-15T18:43:43Z"
+  "written_utc": "2026-10-15T20:56:06Z"
 }
