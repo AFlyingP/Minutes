@@ -1,4 +1,4 @@
-from minutes.ingest.segment import ItemSpan, segment_document
+from minutes.ingest.segment import ItemRow, ItemSpan, link_items, segment_document
 
 
 def parse(text: str) -> list[ItemSpan]:
@@ -86,3 +86,50 @@ def test_lowercase_numbered_sentence_is_not_a_heading() -> None:
 
     assert len(items) == 1
     assert items[0].identifier == "PREAMBLE"
+
+
+def test_link_by_title_similarity() -> None:
+    agenda = [
+        ItemRow(
+            1,
+            "business",
+            "13.B",
+            "Adopt a Resolution Awarding a Construction Contract for the Brentford Circle Trail "
+            "Crossings Project",
+            1,
+        ),
+        ItemRow(2, "business", "13.C", "Approve a park maintenance agreement", 2),
+    ]
+    minutes = [
+        ItemRow(
+            3,
+            "business",
+            "11.B",
+            "Adopt RESOLUTION 2025-157 Awarding a Construction Contract for the Brentford Circle "
+            "Trail Crossings Project",
+            1,
+        ),
+        ItemRow(4, "business", "11.C", "Authorize a software procurement", 2),
+    ]
+
+    assert link_items(agenda, minutes, "granicus") == [(3, 1)]
+
+
+def test_link_ties_go_to_lowest_agenda_ordinal() -> None:
+    agenda = [
+        ItemRow(2, "business", "13.B", "Approve the same city construction project", 2),
+        ItemRow(1, "business", "13.A", "Approve the same city construction project", 1),
+    ]
+    minutes = [ItemRow(3, "business", "11.A", "Approve the same city construction project", 1)]
+
+    assert link_items(agenda, minutes, "granicus") == [(3, 1)]
+
+
+def test_each_agenda_item_linked_at_most_once() -> None:
+    agenda = [ItemRow(1, "business", "13.A", "Approve a major construction project", 1)]
+    minutes = [
+        ItemRow(2, "business", "11.A", "Approve a major construction project", 1),
+        ItemRow(3, "business", "11.B", "Approve a major construction project", 2),
+    ]
+
+    assert link_items(agenda, minutes, "granicus") == [(2, 1)]

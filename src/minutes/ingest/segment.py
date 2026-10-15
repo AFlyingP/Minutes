@@ -20,6 +20,15 @@ class ItemSpan:
 
 
 @dataclass(frozen=True)
+class ItemRow:
+    id: int
+    kind: str
+    identifier: str
+    title: str
+    ordinal: int
+
+
+@dataclass(frozen=True)
 class Line:
     unit: int
     offset: int
@@ -259,8 +268,52 @@ def segment_document(
     return _segment_granicus(units, lines)
 
 
+def _normalized_title(title: str) -> set[str]:
+    title = re.sub(r"adopt(ed)? (a )?resolution( no\.?)?( \d{4}-\d+)?", " ", title.lower())
+    title = re.sub(r"ordinance( no\.?)? \d+[a-z]?", " ", title)
+    title = re.sub(r"[^a-z0-9]", " ", title)
+    return {token for token in title.split() if len(token) >= 3}
+
+
+def link_items(agenda: list[ItemRow], minutes: list[ItemRow], fmt: str) -> list[tuple[int, int]]:
+    """Pair minutes business items with agenda business items."""
+    agenda_items = [row for row in agenda if row.kind == "business"]
+    minutes_items = [row for row in minutes if row.kind == "business"]
+    links = []
+    used: set[int] = set()
+    for minute in sorted(minutes_items, key=lambda row: row.ordinal):
+        if fmt == "legistar":
+            match = next(
+                (
+                    row
+                    for row in agenda_items
+                    if row.identifier == minute.identifier and row.id not in used
+                ),
+                None,
+            )
+            if match is not None:
+                links.append((minute.id, match.id))
+                used.add(match.id)
+            continue
+        minute_tokens = _normalized_title(minute.title)
+        ranked = []
+        for row in agenda_items:
+            if row.id in used:
+                continue
+            agenda_tokens = _normalized_title(row.title)
+            union = minute_tokens | agenda_tokens
+            similarity = len(minute_tokens & agenda_tokens) / len(union) if union else 0.0
+            ranked.append((similarity, -row.ordinal, row))
+        if ranked:
+            similarity, _, match = max(ranked, key=lambda entry: (entry[0], entry[1]))
+            if similarity >= 0.5:
+                links.append((minute.id, match.id))
+                used.add(match.id)
+    return links
+
+
 def run(conn: psycopg.Connection[TupleRow], document_id: str) -> dict[str, object]:
-    """Replace a document's items."""
+    """Replace a document's items and refresh its meeting's agenda links."""
     row = conn.execute(
         "SELECT d.kind, d.meeting_id, c.item_format FROM documents d "
         "JOIN cities c ON c.id = d.city_id WHERE d.id = %s",
@@ -284,4 +337,39 @@ def run(conn: psycopg.Connection[TupleRow], document_id: str) -> dict[str, objec
             "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
             (document_id, meeting_id, *astuple(span)),
         )
+    docs = conn.execute(
+        "SELECT d.kind, d.id FROM documents d WHERE d.meeting_id = %s "
+        "AND d.kind IN ('agenda', 'minutes')",
+        (meeting_id,),
+    ).fetchall()
+    document_ids = {doc_kind: doc_id for doc_kind, doc_id in docs}
+    if {"agenda", "minutes"} <= document_ids.keys():
+        agenda_id = document_ids["agenda"]
+        minutes_id = document_ids["minutes"]
+        agenda_rows = conn.execute(
+            "SELECT id, kind, identifier, title, ordinal FROM items "
+            "WHERE document_id = %s ORDER BY ordinal",
+            (agenda_id,),
+        ).fetchall()
+        minutes_rows = conn.execute(
+            "SELECT id, kind, identifier, title, ordinal FROM items "
+            "WHERE document_id = %s ORDER BY ordinal",
+            (minutes_id,),
+        ).fetchall()
+        if agenda_rows and minutes_rows:
+            conn.execute(
+                "UPDATE items SET linked_item_id = NULL WHERE document_id IN (%s, %s)",
+                (agenda_id, minutes_id),
+            )
+            agenda = [ItemRow(*item) for item in agenda_rows]
+            minutes = [ItemRow(*item) for item in minutes_rows]
+            for minutes_item_id, agenda_item_id in link_items(agenda, minutes, fmt):
+                conn.execute(
+                    "UPDATE items SET linked_item_id = %s WHERE id = %s",
+                    (agenda_item_id, minutes_item_id),
+                )
+                conn.execute(
+                    "UPDATE items SET linked_item_id = %s WHERE id = %s",
+                    (minutes_item_id, agenda_item_id),
+                )
     return {"items": len(spans), "business": sum(span.kind == "business" for span in spans)}
