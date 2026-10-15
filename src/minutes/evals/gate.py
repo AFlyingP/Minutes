@@ -335,6 +335,14 @@ def _record_manifest(
     )
 
 
+def _drop_fixed_chunks(conn: psycopg.Connection[TupleRow], document_id: str) -> None:
+    conn.execute(
+        "DELETE FROM chunks WHERE document_id = %s AND chunker = 'fixed' "
+        "AND EXISTS (SELECT 1 FROM chunks WHERE document_id = %s AND chunker = 'item')",
+        (document_id, document_id),
+    )
+
+
 def gate_document_ids_from_snapshot(path: Path) -> list[str]:
     return [row["row"]["id"] for row in _read_jsonl_gzip(path) if row["table"] == "documents"]
 
@@ -438,6 +446,8 @@ def record(
                 for stage in GATE_STAGES:
                     for document_id in ids:
                         pipeline.run_stage(conn, stage, document_id, "fixture")
+                        if stage == "chunk":
+                            _drop_fixed_chunks(conn, document_id)
         with _recording(recorder):
             runner.run_suite("gate", controls=True, labels_dir=labels_dir, out_path=results_path)
     recorder.write(out_dir)
@@ -511,6 +521,8 @@ def run_gate(
                 for stage in GATE_STAGES:
                     for document_id in ids:
                         pipeline.run_stage(conn, stage, document_id, "fixture")
+                        if stage == "chunk":
+                            _drop_fixed_chunks(conn, document_id)
             results_path.unlink(missing_ok=True)
             results = runner.run_suite(
                 "gate", controls=True, labels_dir=labels_dir, out_path=results_path

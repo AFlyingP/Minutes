@@ -44,7 +44,7 @@ def test_second_run_skips_every_stage(fixture_corpus: str, conn: Connection) -> 
 def test_stage_version_bump_reruns_downstream(
     fixture_corpus: str, conn: Connection, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setitem(pipeline.STAGE_VERSIONS, "chunk", 2)
+    monkeypatch.setitem(pipeline.STAGE_VERSIONS, "chunk", pipeline.STAGE_VERSIONS["chunk"] + 1)
     statuses = {
         stage: pipeline.run_stage(conn, stage, "alder-minutes-101", "fixture").status
         for stage in pipeline.STAGES

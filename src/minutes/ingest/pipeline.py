@@ -20,7 +20,11 @@ from minutes.sources import get_source
 Connection = psycopg.Connection[TupleRow]
 
 STAGES: tuple[str, ...] = ("download", "parse", "ocr", "segment", "chunk", "embed", "extract")
-STAGE_VERSIONS: dict[str, int] = {stage: 1 for stage in STAGES} | {"parse": 5, "segment": 2}
+STAGE_VERSIONS: dict[str, int] = {stage: 1 for stage in STAGES} | {
+    "parse": 5,
+    "segment": 2,
+    "chunk": 2,
+}
 LABEL_GATED_STAGES = ("segment", "chunk", "embed", "extract")
 
 
