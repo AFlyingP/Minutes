@@ -55,11 +55,11 @@ def test_labels_block_counts_fixture_labels(eval_file: EvalFile) -> None:
     assert labels["agent_task"] == 2
 
 
-def test_segmentation_before_real_segmenter(eval_file: EvalFile) -> None:
+def test_segmentation_matches_fixture_counts(eval_file: EvalFile) -> None:
     segmentation = cast(dict[str, object], eval_file.results["segmentation"])
     overall = cast(dict[str, object], segmentation["overall"])
-    assert overall["exact_rate"] == 0.0
-    assert overall["mae"] == 3.25
+    assert overall["exact_rate"] == 1.0
+    assert overall["mae"] == 0.0
 
 
 def test_retrieval_block_has_three_k_values_per_mode(eval_file: EvalFile) -> None:

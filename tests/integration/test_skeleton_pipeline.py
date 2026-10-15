@@ -28,7 +28,7 @@ def test_fixture_load_counts(fixture_corpus: str, conn: Connection) -> None:
         "SELECT count(*) FILTER (WHERE embedding IS NULL), min(vector_dims(embedding)) FROM chunks"
     ).fetchone()
     assert counts is not None
-    assert counts[:3] == (12, 23, 8)
+    assert counts[:3] == (12, 23, 85)
     assert counts[3] > 0
     assert embeddings == (0, 768)
 
