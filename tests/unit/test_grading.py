@@ -8,6 +8,13 @@ from minutes.labels.schema import Label
 from minutes.llm import Budget, ChatResult
 
 
+def test_validate_without_cases_reports_null_accuracy_and_kappa() -> None:
+    result = grader.validate([])
+    for score in (result.answer, result.support):
+        assert score.accuracy is None
+        assert score.kappa is None
+
+
 class RecordingClient:
     def __init__(self, responses: list[dict[str, object]]) -> None:
         self.responses = responses

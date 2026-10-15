@@ -3,6 +3,7 @@ import hashlib
 import json
 import os
 import tempfile
+from functools import lru_cache
 from pathlib import Path
 from typing import Any, cast
 
@@ -54,13 +55,23 @@ class ReplayStore:
     """Read recorded response entries from a gzip JSONL file."""
 
     def __init__(self, path: Path) -> None:
-        self.values: dict[str, dict[str, Any]] = {}
         if not path.exists():
+            self.values: dict[str, dict[str, Any]] = {}
             return
-        with gzip.open(path, "rt", encoding="utf-8") as file:
-            for line in file:
-                row = json.loads(line)
-                self.values[row["key"]] = row["value"]
+        self.values = _replay_values(*recording_signature(path))
 
     def get(self, key: str) -> dict[str, Any] | None:
         return self.values.get(key)
+
+
+def recording_signature(path: Path) -> tuple[Path, int, int]:
+    path = path.resolve()
+    stat = path.stat()
+    return path, stat.st_mtime_ns, stat.st_size
+
+
+@lru_cache(maxsize=8)
+def _replay_values(path: Path, mtime_ns: int, size: int) -> dict[str, dict[str, Any]]:
+    with gzip.open(path, "rt", encoding="utf-8") as file:
+        rows = [json.loads(line) for line in file if line.strip()]
+    return {row["key"]: row["value"] for row in rows}

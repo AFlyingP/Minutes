@@ -1,13 +1,16 @@
 import math
+from collections.abc import Sequence
 from statistics import median
 
 from minutes.labels.schema import Passage
 from minutes.retrieval.search import Hit, Span
 
 
-def passage_retrieved(passage: Passage, spans: list[Span]) -> bool:
-    """Whether matching document and unit spans cover at least half the passage."""
+def passage_retrieved(passage: Passage, spans: list[Span]) -> bool | None:
+    """Return half-coverage status, or null for a zero-length passage."""
     length = passage.end - passage.start
+    if length == 0:
+        return None
     intervals = sorted(
         (
             max(passage.start, span.start_offset),
@@ -27,14 +30,20 @@ def passage_retrieved(passage: Passage, spans: list[Span]) -> bool:
     return covered / length >= 0.5
 
 
-def recall_for_question(passages: list[Passage], hits: list[Hit], k: int) -> float:
+def recall_for_question(passages: list[Passage], hits: list[Hit], k: int) -> float | None:
     """Measure the fraction of gold passages covered by the first k ranked hits."""
     spans = [span for hit in hits if hit.rank <= k for span in hit.spans]
-    return sum(passage_retrieved(passage, spans) for passage in passages) / len(passages)
+    retrieved = [passage_retrieved(passage, spans) for passage in passages]
+    if not retrieved or any(value is None for value in retrieved):
+        return None
+    return sum(value is True for value in retrieved) / len(passages)
 
 
-def mean_or_none(values: list[float]) -> float | None:
-    return sum(values) / len(values) if values else None
+def mean_or_none(values: Sequence[float | None]) -> float | None:
+    """Return the mean, or null for no values or any undefined value."""
+    if not values or any(value is None for value in values):
+        return None
+    return sum(value for value in values if value is not None) / len(values)
 
 
 def segmentation_metrics(pairs: list[tuple[str, int, int]]) -> dict[str, object]:
@@ -49,10 +58,10 @@ def segmentation_metrics(pairs: list[tuple[str, int, int]]) -> dict[str, object]
     }
 
 
-def percentile(values: list[float], p: int) -> float:
-    """Return the nearest-rank percentile of a non-empty sample."""
+def percentile(values: list[float], p: int) -> float | None:
+    """Return the nearest-rank percentile, or null for an empty sample."""
     if not values:
-        raise ValueError("values must not be empty")
+        return None
     ordered = sorted(values)
     return ordered[math.ceil(p / 100 * len(ordered)) - 1]
 
@@ -70,11 +79,11 @@ def summarize_runs(values: list[float | None]) -> dict[str, int | float | None]:
     }
 
 
-def cohen_kappa(grader: list[bool], expected: list[bool]) -> float:
+def cohen_kappa(grader: list[bool], expected: list[bool]) -> float | None:
     """Compute Cohen's kappa, including its defined degenerate case."""
     pairs = list(zip(grader, expected, strict=True))
     if not pairs:
-        return 0.0
+        return None
     observed = sum(left == right for left, right in pairs) / len(pairs)
     grader_yes = sum(grader) / len(grader)
     expected_yes = sum(expected) / len(expected)

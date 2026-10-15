@@ -6,6 +6,7 @@ from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from functools import lru_cache
 from math import isclose
 from pathlib import Path
 from typing import Any, cast
@@ -21,7 +22,7 @@ from minutes.errors import ConfigError, GateStaleError, LLMReplayMiss
 from minutes.evals import runner
 from minutes.ingest import pipeline
 from minutes.labels.schema import parse_payload
-from minutes.llm.cache import DiskCache
+from minutes.llm.cache import DiskCache, recording_signature
 from minutes.models import Embedder, Reranker
 
 SNAPSHOT_TABLES = ("cities", "meetings", "documents", "units")
@@ -187,21 +188,31 @@ class Recorder:
         )
 
 
+@lru_cache(maxsize=8)
+def _embedding_values(path: Path, mtime_ns: int, size: int) -> dict[str, np.ndarray]:
+    with np.load(path) as values:
+        return {
+            key.decode("ascii"): vector.astype(np.float32)
+            for key, vector in zip(values["keys"], values["vectors"], strict=True)
+        }
+
+
+@lru_cache(maxsize=8)
+def _rerank_values(path: Path, mtime_ns: int, size: int) -> dict[str, float]:
+    return {row["key"]: float(row["score"]) for row in _read_jsonl_gzip(path)}
+
+
 class ReplayEmbedder:
     model_id = "BAAI/bge-base-en-v1.5"
     dim = 768
 
     def __init__(self, path: Path = ROOT / "eval" / "gate" / "embeddings.npz") -> None:
-        with np.load(path) as values:
-            self.values = {
-                key.decode("ascii"): vector.astype(np.float32)
-                for key, vector in zip(values["keys"], values["vectors"], strict=True)
-            }
+        self.values = _embedding_values(*recording_signature(path))
 
     def _embed(self, kind: str, text: str) -> np.ndarray:
         key = hashlib.sha256(f"embed\n{self.model_id}\n{kind}\n{text}".encode()).hexdigest()
         try:
-            return cast(np.ndarray, self.values[key])
+            return self.values[key]
         except KeyError as err:
             raise GateStaleError(
                 f"gate recording is stale: missing embed key for {text[:40]}"
@@ -218,7 +229,7 @@ class ReplayReranker:
     model_id = "BAAI/bge-reranker-v2-m3"
 
     def __init__(self, path: Path = ROOT / "eval" / "gate" / "rerank.jsonl.gz") -> None:
-        self.values = {row["key"]: float(row["score"]) for row in _read_jsonl_gzip(path)}
+        self.values = _rerank_values(*recording_signature(path))
 
     def score(self, query: str, passages: list[str]) -> list[float]:
         scores = []
@@ -272,7 +283,8 @@ def compare(results: Mapping[str, object], baseline: Mapping[str, float]) -> lis
         failed = value is None
         if value is not None:
             if direction == "cost":
-                failed = value > baseline_value * (1 + tolerance)
+                threshold = baseline_value * (1 + tolerance)
+                failed = value > threshold and not isclose(value, threshold, abs_tol=1e-12)
             else:
                 threshold = baseline_value - tolerance
                 failed = value < threshold and not isclose(value, threshold, abs_tol=1e-12)
@@ -476,6 +488,9 @@ def run_gate(
     baseline_path = baseline_path or ROOT / "eval" / "baseline.json"
     labels_dir = labels_dir or ROOT / "eval" / "labels"
     results_path = results_path or gate_results_path()
+    for name in ("snapshot.jsonl.gz", "embeddings.npz", "rerank.jsonl.gz", "llm.jsonl.gz"):
+        if not (recording_dir / name).is_file():
+            raise GateStaleError(f"gate recording is stale: missing {name}")
     db.reset(settings.test_database_url)
     with (
         _replay_directory(recording_dir),
@@ -496,6 +511,7 @@ def run_gate(
                 for stage in GATE_STAGES:
                     for document_id in ids:
                         pipeline.run_stage(conn, stage, document_id, "fixture")
+            results_path.unlink(missing_ok=True)
             results = runner.run_suite(
                 "gate", controls=True, labels_dir=labels_dir, out_path=results_path
             )

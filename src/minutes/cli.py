@@ -135,8 +135,13 @@ def eval_validate_grader() -> None:
         },
     )
     for name, score in scores.items():
-        typer.echo(f"{name}_grader accuracy={score.accuracy:.3f} kappa={score.kappa:.3f}")
-    if any(score.accuracy < 0.90 or score.kappa < 0.80 for score in scores.values()):
+        accuracy = "null" if score.accuracy is None else f"{score.accuracy:.3f}"
+        kappa = "null" if score.kappa is None else f"{score.kappa:.3f}"
+        typer.echo(f"{name}_grader accuracy={accuracy} kappa={kappa}")
+    if any(
+        score.accuracy is None or score.kappa is None or score.accuracy < 0.90 or score.kappa < 0.80
+        for score in scores.values()
+    ):
         raise typer.Exit(1)
 
 

@@ -282,8 +282,10 @@ class ThinClient:
                 except httpx.TransportError as err:
                     transport_attempt += 1
                     if transport_attempt > 3:
-                        message = str(err).replace(self.settings.llm_api_key, "***")
-                        raise LLMTransportError(f"request failed: {message}") from err
+                        message = str(err)
+                        if self.settings.llm_api_key:
+                            message = message.replace(self.settings.llm_api_key, "***")
+                        raise LLMTransportError(f"request failed: {message}") from None
                     jitter = random.Random(int(key[:8], 16) + transport_attempt).uniform(0.0, 1.0)
                     self.wait(2 * 2 ** (transport_attempt - 1) + jitter)
                     continue
@@ -306,13 +308,16 @@ class ThinClient:
                     self.wait(2 * 2 ** (transport_attempt - 1) + jitter)
                     continue
                 if 400 <= response.status_code <= 499:
-                    detail = response.text[:200].replace(self.settings.llm_api_key, "***")
+                    detail = response.text
+                    if self.settings.llm_api_key:
+                        detail = detail.replace(self.settings.llm_api_key, "***")
+                    detail = detail[:200]
                     raise LLMTransportError(f"http {response.status_code}: {detail}")
                 try:
                     data = response.json()
                     content = data["choices"][0]["message"]["content"]
-                except (ValueError, KeyError, IndexError, TypeError) as err:
-                    raise LLMTransportError("invalid response body") from err
+                except (ValueError, KeyError, IndexError, TypeError):
+                    raise LLMTransportError("invalid response body") from None
                 if not isinstance(content, str):
                     raise LLMTransportError("invalid response body")
                 usage = data.get("usage")
@@ -345,8 +350,8 @@ class ThinClient:
         try:
             value = json.loads(text)
             jsonschema.validate(value, schema)
-        except (ValueError, jsonschema.ValidationError) as err:
-            raise LLMOutputError("invalid JSON or schema mismatch") from err
+        except (ValueError, jsonschema.ValidationError):
+            raise LLMOutputError("invalid JSON or schema mismatch") from None
         if not isinstance(value, dict):
             raise LLMOutputError("invalid JSON or schema mismatch")
         return value

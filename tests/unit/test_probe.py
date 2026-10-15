@@ -9,6 +9,7 @@ from typer.testing import CliRunner
 from minutes import config, probe
 from minutes.cli import app
 from minutes.config import get_settings
+from minutes.errors import ConfigError
 from minutes.sources import base as source_base
 
 KEY = "sk-test-0123456789"
@@ -74,6 +75,32 @@ def test_probe_llm_reports_missing_config() -> None:
     results = probe.probe_llm()
     assert len(results) == 1
     assert results[0].ok is False
+
+
+@pytest.mark.parametrize("key", [KEY, ""])
+def test_failure_masks_only_nonempty_settings_key(
+    monkeypatch: pytest.MonkeyPatch, key: str
+) -> None:
+    settings = config.Settings.model_construct(llm_api_key=key)
+    monkeypatch.setattr(probe, "get_settings", lambda: settings)
+    assert "MINUTES_LLM_API_KEY" not in os.environ
+    result = probe._failure("llm", ValueError(f"failed {KEY}"))
+    expected = "***" if key else KEY
+    assert result.detail == f"ValueError: failed {expected}"
+
+
+@pytest.mark.parametrize("key", [KEY, ""])
+def test_failure_falls_back_to_environment_when_settings_fail(
+    monkeypatch: pytest.MonkeyPatch, key: str
+) -> None:
+    def invalid_settings() -> config.Settings:
+        raise ConfigError("invalid settings")
+
+    monkeypatch.setattr(probe, "get_settings", invalid_settings)
+    monkeypatch.setenv("MINUTES_LLM_API_KEY", key)
+    result = probe._failure("llm", ValueError(f"failed {KEY}"))
+    expected = "***" if key else KEY
+    assert result.detail == f"ValueError: failed {expected}"
 
 
 def test_probe_sources_with_mock_transport() -> None:

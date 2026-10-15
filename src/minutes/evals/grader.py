@@ -35,8 +35,8 @@ class SupportCase:
 
 @dataclass(frozen=True)
 class GraderScore:
-    accuracy: float
-    kappa: float
+    accuracy: float | None
+    kappa: float | None
 
 
 @dataclass(frozen=True)
@@ -172,9 +172,8 @@ def validation_cases(labels: list[Label]) -> tuple[list[AnswerCase], list[Suppor
 
 
 def _score(graded: list[bool], expected: list[bool]) -> GraderScore:
-    accuracy = sum(actual == target for actual, target in zip(graded, expected, strict=True)) / len(
-        expected
-    )
+    correct = sum(actual == target for actual, target in zip(graded, expected, strict=True))
+    accuracy = correct / len(expected) if expected else None
     return GraderScore(accuracy, cohen_kappa(graded, expected))
 
 

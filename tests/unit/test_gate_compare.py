@@ -28,6 +28,15 @@ def test_cost_fails_when_above_110_percent() -> None:
     assert compare({"cost": {"controls_on": {"cost_per_query_usd": 0.0110}}}, baseline) == []
 
 
+def test_cost_boundary_allows_float_roundoff() -> None:
+    baseline = {"cost_per_query_usd": 0.01}
+    boundary = 0.01 * 1.10
+    results = {"cost": {"controls_on": {"cost_per_query_usd": boundary + 1e-15}}}
+    assert compare(results, baseline) == []
+    results["cost"]["controls_on"]["cost_per_query_usd"] = boundary + 1e-6
+    assert len(compare(results, baseline)) == 1
+
+
 def test_metric_missing_from_baseline_is_not_compared() -> None:
     results = {"segmentation": {"overall": {"exact_rate": 0.0}}}
     assert compare(results, {}) == []

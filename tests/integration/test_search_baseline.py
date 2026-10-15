@@ -45,7 +45,14 @@ def test_vector_and_keyword_modes_available_over_http(fixture_corpus: str) -> No
         "/api/search",
         params={"q": "sidewalk repair contract", "mode": "hybrid", "chunker": "fixed"},
     )
+    keyword = client.get(
+        "/api/search",
+        params={"q": "sidewalk repair contract", "mode": "keyword", "chunker": "fixed"},
+    )
     assert vector.status_code == 200
+    assert vector.json()["hits"]
+    assert keyword.status_code == 200
+    assert keyword.json()["hits"]
     assert hybrid.status_code == 422
 
 

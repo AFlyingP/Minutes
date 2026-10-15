@@ -139,7 +139,7 @@ def _retrieval(context: EvalContext) -> Result:
     fixed = cast(dict[str, object], result["fixed"])
     latency: dict[str, object] = {}
     for mode in ("keyword", "vector"):
-        values: dict[int, list[float]] = {5: [], 10: [], 20: []}
+        values: dict[int, list[float | None]] = {5: [], 10: [], 20: []}
         for label, payload in answerable:
             hits = _search(context, label, payload.question, mode, 20)
             for k in values:

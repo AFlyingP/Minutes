@@ -1,5 +1,4 @@
 import json
-import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import cast
@@ -77,7 +76,8 @@ def test_only_updates_named_section_and_keeps_others(
     eval_file: EvalFile, tmp_path: Path, fixture_corpus: str
 ) -> None:
     output = tmp_path / "existing.json"
-    output.write_text(json.dumps(eval_file.results), encoding="utf-8")
+    existing = {**eval_file.results, "retrieval": {"sentinel": "keep this section"}}
+    output.write_text(json.dumps(existing), encoding="utf-8")
     run_suite(
         suite="full",
         controls=True,
@@ -86,7 +86,7 @@ def test_only_updates_named_section_and_keeps_others(
         only={"segmentation"},
     )
     merged = cast(dict[str, object], json.loads(output.read_text(encoding="utf-8")))
-    assert merged["retrieval"] == eval_file.results["retrieval"]
+    assert merged["retrieval"] == existing["retrieval"]
     assert merged["segmentation"] == eval_file.results["segmentation"]
 
 
@@ -123,26 +123,73 @@ def test_unknown_section_is_rejected(tmp_path: Path, fixture_corpus: str) -> Non
         )
 
 
-def _numbers(value: object) -> set[float]:
-    if isinstance(value, bool):
-        return set()
-    if isinstance(value, (int, float)):
-        return {round(float(value), 4)}
-    if isinstance(value, dict):
-        return set().union(*(_numbers(item) for item in value.values()))
-    if isinstance(value, list):
-        return set().union(*(_numbers(item) for item in value))
-    return set()
-
-
 def test_render_table_numbers_come_from_results(eval_file: EvalFile) -> None:
     table = render_table(eval_file.results)
-    result_numbers = _numbers(eval_file.results)
+    paths = {
+        "documents": "corpus.documents",
+        "pages": "corpus.pages",
+        "cities": "corpus.cities",
+        "recall@10 keyword": "retrieval.item.keyword.recall_at_10",
+        "recall@10 vector": "retrieval.item.vector.recall_at_10",
+        "recall@10 hybrid": "retrieval.item.hybrid.recall_at_10",
+        "recall@10 hybrid + reranker": "retrieval.item.hybrid_rerank.recall_at_10",
+        "recall@5 hybrid + reranker": "retrieval.item.hybrid_rerank.recall_at_5",
+        "recall@20 hybrid + reranker": "retrieval.item.hybrid_rerank.recall_at_20",
+        "recall@10 fixed-size chunks, vector": "retrieval.fixed.vector.recall_at_10",
+        "agenda segmentation exact count": "segmentation.overall.exact_rate",
+        "agenda segmentation mean absolute error": "segmentation.overall.mae",
+        "extraction accuracy": "extraction.overall",
+        "answer accuracy baseline": "answers.baseline.answer_accuracy",
+        "answer accuracy final": "answers.final.answer_accuracy",
+        "answer accuracy LangGraph": "answers.langgraph.answer_accuracy",
+        "faithfulness baseline": "answers.baseline.faithfulness",
+        "faithfulness final": "answers.final.faithfulness",
+        "decline accuracy final": "answers.final.decline_accuracy",
+        "agent task completion": "agent.completion",
+        "cost per query, controls off": "cost.controls_off.cost_per_query_usd",
+        "cost per query, controls on": "cost.controls_on.cost_per_query_usd",
+        "cost reduction": "cost.reduction",
+        "answer latency p50": "answers.final.latency_ms.p50",
+        "answer latency p95": "answers.final.latency_ms.p95",
+        "pgvector ANN recall@10": "vector_bench.pgvector.ann_recall_at_10",
+        "pgvector ANN p50": "vector_bench.pgvector.p50_ms",
+        "pgvector ANN p95": "vector_bench.pgvector.p95_ms",
+        "Qdrant ANN recall@10": "vector_bench.qdrant.ann_recall_at_10",
+        "Qdrant ANN p50": "vector_bench.qdrant.p50_ms",
+        "Qdrant ANN p95": "vector_bench.qdrant.p95_ms",
+        "answer grader agreement": "grader.answer.accuracy",
+        "support grader agreement": "grader.support.accuracy",
+        "labels written by an automated pass": "labels.authors.agent",
+        "labels written by a human": "labels.authors.human",
+    }
+    corpus = cast(dict[str, object], eval_file.results["corpus"])
+    for city in cast(dict[str, object], corpus["per_city"]):
+        paths[f"parse quality {city}"] = f"corpus.per_city.{city}.parse_quality"
+
+    def number(value: object) -> str:
+        if value is None:
+            return "n/a"
+        assert isinstance(value, (int, float))
+        return f"{value:.6f}".rstrip("0").rstrip(".")
+
     for line in table.splitlines()[2:]:
-        cells = line.strip("|").split("|")
-        for cell in cells[1:3]:
-            for number in re.findall(r"(?<![A-Za-z])\d+(?:\.\d+)?", cell):
-                assert round(float(number), 4) in result_numbers
+        name, value, runs, _ = [cell.strip() for cell in line.strip("|").split("|")]
+        source: object = eval_file.results
+        if name == "labels reviewed by a human":
+            labels = cast(dict[str, object], eval_file.results["labels"])
+            source = sum(cast(dict[str, int], labels["human_reviewed"]).values())
+        else:
+            for part in paths[name].split("."):
+                source = source.get(part) if isinstance(source, dict) else None
+        if isinstance(source, dict):
+            assert value == number(source["median"]), name
+            assert runs == (
+                f"{source['runs']} ({number(source['min'])} / "
+                f"{number(source['median'])} / {number(source['max'])})"
+            ), name
+        else:
+            assert value == number(source), name
+            assert runs == "n/a", name
     without_sections = render_table({"suite": "full"})
     assert "| recall@10 keyword | n/a | n/a | full |" in without_sections
     assert "| answer accuracy final | n/a | n/a | full |" in without_sections

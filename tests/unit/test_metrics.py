@@ -145,3 +145,21 @@ def test_cohen_kappa_known_value() -> None:
 
 def test_cohen_kappa_degenerate_denominator() -> None:
     assert cohen_kappa([True, True], [True, True]) == 1.0
+
+
+def test_recall_zero_denominators_propagate_null() -> None:
+    empty = _passage("minutes-1", 1, 10, 10)
+    assert passage_retrieved(empty, []) is None
+    assert recall_for_question([empty], [], 5) is None
+    assert recall_for_question([], [], 5) is None
+    assert mean_or_none([1.0, recall_for_question([empty], [], 5)]) is None
+    assert mean_or_none([1.0, recall_for_question([], [], 5)]) is None
+
+
+def test_percentile_empty_is_none() -> None:
+    assert percentile([], 50) is None
+    assert percentile([], 95) is None
+
+
+def test_cohen_kappa_without_cases_is_none() -> None:
+    assert cohen_kappa([], []) is None

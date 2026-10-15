@@ -63,13 +63,13 @@ def test_baseline_declines_when_no_chunks_match_filters(fixture_corpus: str) -> 
 def test_answers_section_reports_five_runs_per_metric(answers_results: dict[str, object]) -> None:
     answers = cast(dict[str, object], answers_results["answers"])
     baseline = cast(dict[str, object], answers["baseline"])
-    accuracy = cast(dict[str, object], baseline["answer_accuracy"])
-    minimum = cast(float, accuracy["min"])
-    median = cast(float, accuracy["median"])
-    maximum = cast(float, accuracy["max"])
-
-    assert accuracy["runs"] == 5
-    assert minimum <= median <= maximum
+    for metric in ("answer_accuracy", "decline_accuracy", "false_decline_rate", "faithfulness"):
+        summary = cast(dict[str, object], baseline[metric])
+        minimum = cast(float, summary["min"])
+        median = cast(float, summary["median"])
+        maximum = cast(float, summary["max"])
+        assert summary["runs"] == 5
+        assert minimum <= median <= maximum
 
 
 def test_answer_cost_is_sum_of_call_costs(fixture_corpus: str) -> None:

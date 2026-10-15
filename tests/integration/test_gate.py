@@ -1,4 +1,3 @@
-import gzip
 import hashlib
 import json
 import os
@@ -8,7 +7,6 @@ import sys
 from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
 from urllib.parse import urlsplit
 
 import numpy as np
@@ -73,28 +71,30 @@ def _record(tmp_path_factory: pytest.TempPathFactory, source_url: str) -> GateFi
     return GateFiles(recording, labels, results, baseline)
 
 
-def _snapshot_rows(path: Path) -> list[dict[str, Any]]:
-    with gzip.open(path, "rt", encoding="utf-8") as file:
-        return [json.loads(line) for line in file]
-
-
 def test_snapshot_round_trip_restores_documents_and_units(
     gate_files: GateFiles, fixture_corpus: str
 ) -> None:
-    rows = _snapshot_rows(gate_files.recording / "snapshot.jsonl.gz")
-    expected_documents = [row["row"] for row in rows if row["table"] == "documents"]
-    expected_units = [row["row"] for row in rows if row["table"] == "units"]
+    ids = gate.gate_document_ids_from_snapshot(gate_files.recording / "snapshot.jsonl.gz")
+    with db.connect(fixture_corpus) as conn:
+        expected_documents = gate._rows(
+            conn, "SELECT * FROM documents WHERE id = ANY(%s) ORDER BY id", (ids,)
+        )
+        expected_units = gate._rows(
+            conn,
+            "SELECT * FROM units WHERE document_id = ANY(%s) ORDER BY document_id, unit_index",
+            (ids,),
+        )
+    for row in expected_units:
+        row.pop("boxes")
+    db.reset(get_settings().test_database_url)
     with db.connect(get_settings().test_database_url) as conn:
-        documents = conn.execute("SELECT id FROM documents ORDER BY id").fetchall()
-        units = conn.execute(
-            "SELECT document_id, unit_index, text FROM units ORDER BY document_id, unit_index"
-        ).fetchall()
-    assert len(documents) == len(expected_documents)
-    assert len(units) == len(expected_units)
-    assert [row[0] for row in documents] == [row["id"] for row in expected_documents]
-    assert [(row[0], row[1], row[2]) for row in units] == [
-        (row["document_id"], row["unit_index"], row["text"]) for row in expected_units
-    ]
+        gate.load_snapshot(conn, gate_files.recording)
+        documents = gate._rows(conn, "SELECT * FROM documents ORDER BY id", ())
+        units = gate._rows(conn, "SELECT * FROM units ORDER BY document_id, unit_index", ())
+    for row in units:
+        row.pop("boxes")
+    assert documents == expected_documents
+    assert units == expected_units
 
 
 def test_snapshot_bytes_are_reproducible(
@@ -132,28 +132,19 @@ def test_record_then_gate_passes_in_replay_mode(
 
 
 def test_replay_makes_no_model_call_and_imports_no_gpu_library(
-    gate_files: GateFiles, monkeypatch: pytest.MonkeyPatch
+    gate_files: GateFiles,
 ) -> None:
-    from minutes.models import embedder, reranker
-
-    monkeypatch.setattr(embedder, "_load_model", lambda: pytest.fail("embed model loaded"))
-    monkeypatch.setattr(reranker, "_load_model", lambda: pytest.fail("reranker loaded"))
-    monkeypatch.setenv("MINUTES_LLM_MODE", "replay")
-    monkeypatch.setenv("MINUTES_MODELS_MODE", "replay")
-    get_settings.cache_clear()
-    assert (
-        gate.run_gate(
-            recording_dir=gate_files.recording,
-            baseline_path=gate_files.baseline,
-            labels_dir=gate_files.labels,
-            results_path=gate_files.results,
-        )
-        == 0
-    )
     code = (
         "import json, sys; "
+        "from unittest.mock import patch; "
         "from pathlib import Path; "
+        "from minutes.models import embedder, reranker; "
         "from minutes.evals.gate import run_gate; "
+        "patch('httpx.Client.send', side_effect=AssertionError('http request sent')).start(); "
+        "patch.object(embedder, '_load_model', "
+        "side_effect=AssertionError('embed model loaded')).start(); "
+        "patch.object(reranker, '_load_model', "
+        "side_effect=AssertionError('reranker loaded')).start(); "
         f"result = run_gate(recording_dir=Path({str(gate_files.recording)!r}), "
         f"baseline_path=Path({str(gate_files.baseline)!r}), "
         f"labels_dir=Path({str(gate_files.labels)!r}), "

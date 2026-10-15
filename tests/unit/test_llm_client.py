@@ -7,6 +7,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import httpx
+import psycopg
 import pytest
 
 from minutes import config
@@ -20,7 +21,10 @@ from minutes.errors import (
 from minutes.llm import Budget
 from minutes.llm.cache import DiskCache, ReplayStore, cache_key
 from minutes.llm.client import ThinClient
+from minutes.llm.client import _record_call as record_call
 from minutes.llm.prices import cost_usd
+from minutes.log import JsonFormatter
+from minutes.tracing import configure_tracing, get_test_exporter
 
 KEY = "unit-test-key-never-log"
 SCHEMA = {
@@ -366,7 +370,16 @@ def test_rate_limit_spaces_request_starts_by_3_seconds(tmp_path: Path) -> None:
 def test_replay_miss_raises(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("MINUTES_LLM_MODE", "replay")
     config.get_settings.cache_clear()
-    client = ThinClient(cache=ReplayStore(tmp_path / "missing.jsonl.gz"), clock=FakeClock())
+
+    def unexpected_request(request: httpx.Request) -> httpx.Response:
+        pytest.fail("replay sent an http request")
+
+    client = make_client(
+        httpx.MockTransport(unexpected_request),
+        tmp_path,
+        FakeClock(),
+        cache=ReplayStore(tmp_path / "missing.jsonl.gz"),
+    )
     with pytest.raises(LLMReplayMiss):
         client.chat(purpose="synth", messages=[{"role": "user", "content": "missing"}])
 
@@ -402,18 +415,85 @@ def test_usage_missing_falls_back_to_estimate(
 
 
 def test_api_key_never_appears_in_logs_or_cache(
-    tmp_path: Path, caplog: pytest.LogCaptureFixture
+    tmp_path: Path, caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    from minutes.llm import client as client_module
+
+    monkeypatch.setattr(client_module, "_record_call", record_call)
+    monkeypatch.setattr(logging.getLogger("minutes"), "propagate", True)
+
+    def unavailable_database(*args: object, **kwargs: object) -> None:
+        raise psycopg.OperationalError("database unavailable")
+
+    monkeypatch.setattr(psycopg, "connect", unavailable_database)
+    configure_tracing(test=True)
+    exporter = get_test_exporter()
+    assert exporter is not None
     clock = FakeClock()
-    root = tmp_path / "cache"
+    root = tmp_path / "data"
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if json.loads(request.content)["messages"][0]["content"] == "fail":
+            raise httpx.ConnectError(f"connection rejected {KEY}")
+        return success()
+
     client = make_client(
-        httpx.MockTransport(lambda request: success()),
+        httpx.MockTransport(handler),
         tmp_path,
         clock,
-        cache=DiskCache(root),
+        cache=DiskCache(root / "cache" / "llm"),
     )
     with caplog.at_level(logging.INFO, logger="minutes"):
         client.chat(purpose="synth", messages=[{"role": "user", "content": "private"}])
+        with pytest.raises(LLMTransportError):
+            try:
+                client.chat(purpose="synth", messages=[{"role": "user", "content": "fail"}])
+            except LLMTransportError:
+                logging.getLogger("minutes.llm").exception("request failed")
+                raise
+    formatter = JsonFormatter()
+    structured = [json.loads(formatter.format(record)) for record in caplog.records]
+    calls = [row for row in structured if row["event"] == "llm_call"]
+    assert len(calls) == 1
+    assert calls[0]["fields"]["purpose"] == "synth"
+    assert KEY not in json.dumps(structured)
     assert KEY not in caplog.text
+    spans = exporter.get_finished_spans()
+    assert len(spans) == 2
+    assert any(event.name == "exception" for span in spans for event in span.events)
+    assert all(KEY not in span.to_json() for span in spans)
     files = [path for path in root.rglob("*") if path.is_file()]
-    assert all(KEY not in path.read_text(encoding="utf-8") for path in files)
+    assert root / "cache" / "llm_usage.json" in files
+    assert any(path.parent.parent.name == "llm" for path in files)
+    assert all(KEY.encode() not in path.read_bytes() for path in files)
+
+
+@pytest.mark.parametrize("kind", ["transport", "response", "schema"])
+def test_error_tracebacks_hide_key(tmp_path: Path, kind: str) -> None:
+    import traceback
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if kind == "transport":
+            raise httpx.ConnectError(KEY)
+        if kind == "response":
+            return httpx.Response(200, json={KEY: "invalid"})
+        return success(json.dumps({"answer": KEY}))
+
+    client = make_client(httpx.MockTransport(handler), tmp_path, FakeClock())
+    with pytest.raises((LLMTransportError, LLMOutputError)) as caught:
+        client.chat(purpose="synth", messages=[], schema=SCHEMA)
+    assert caught.value.__cause__ is None
+    assert KEY not in "".join(traceback.format_exception(caught.value))
+
+
+def test_empty_key_does_not_change_error_text(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    client = make_client(
+        httpx.MockTransport(lambda request: httpx.Response(400, text="bad request")),
+        tmp_path,
+        FakeClock(),
+    )
+    monkeypatch.setattr(client.settings, "llm_api_key", "")
+    with pytest.raises(LLMTransportError, match=r"^http 400: bad request$"):
+        client.chat(purpose="synth", messages=[])

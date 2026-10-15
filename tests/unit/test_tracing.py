@@ -38,6 +38,9 @@ class FakeClock:
 def isolated_settings(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, request: pytest.FixtureRequest
 ) -> Iterator[None]:
+    from minutes.llm import client as client_module
+
+    monkeypatch.setattr(client_module, "_LAST_START", None)
     if request.node.get_closest_marker("integration") is not None:
         yield
         return

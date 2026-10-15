@@ -16,6 +16,7 @@ import pdfplumber
 from PIL import Image
 
 from minutes.config import FIXTURE_MANIFEST, CityConfig, get_settings, load_cities, load_models
+from minutes.errors import ConfigError
 from minutes.ingest import parse
 from minutes.ingest.layout import Word, build_text
 from minutes.ingest.ocr import DoctrEngine
@@ -42,6 +43,12 @@ class ProbeResult:
 
 def _failure(name: str, err: Exception) -> ProbeResult:
     detail = f"{type(err).__name__}: {err}"
+    try:
+        key = get_settings().llm_api_key
+    except ConfigError:
+        key = os.environ.get("MINUTES_LLM_API_KEY", "")
+    if key:
+        detail = detail.replace(key, "***")
     return ProbeResult(name, False, detail[:200])
 
 
