@@ -203,12 +203,26 @@ def target_test(flags: set[str]) -> int:
     dirs = [d for d in ("tests/unit", "tests/integration") if Path(d).is_dir()]
     pytest = ["uv", "run", "pytest", *dirs, "--cov", "--cov-report=term"]
     pytest.append(f"--cov-report=json:{COVERAGE_FILE}")
-    return seq(
-        lambda: compose_up("db"),
-        lambda: run(pytest, env=ENV_STUB),
-        check_coverage,
-        lambda: web(["npm", "run", "test"]),
-    )
+    code = compose_up("db")
+    if code != 0:
+        return code
+    vitest = None
+    cmd = ["npm.cmd" if WINDOWS else "npm", "run", "test"]
+    if not missing("npm run test", "web/package.json"):
+        vitest = subprocess.Popen(
+            cmd,
+            cwd="web",
+            env=child_env({"PLAYWRIGHT_BROWSERS_PATH": "0"}),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+        )
+    code = seq(lambda: run(pytest, env=ENV_STUB), check_coverage)
+    if vitest is None:
+        return code
+    output, _ = vitest.communicate()
+    say("$ " + " ".join(cmd))
+    say(output.decode("utf-8", errors="replace"))
+    return code or vitest.returncode
 
 
 def target_e2e(flags: set[str]) -> int:
