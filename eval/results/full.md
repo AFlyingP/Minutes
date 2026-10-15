@@ -10,8 +10,8 @@
 | recall@5 hybrid + reranker | n/a | n/a | full |
 | recall@20 hybrid + reranker | n/a | n/a | full |
 | recall@10 fixed-size chunks, vector | 0.4062 | n/a | full |
-| agenda segmentation exact count | 0.15 | n/a | full |
-| agenda segmentation mean absolute error | 7.6 | n/a | full |
+| agenda segmentation exact count | 1 | n/a | full |
+| agenda segmentation mean absolute error | 0 | n/a | full |
 | extraction accuracy | n/a | n/a | full |
 | answer accuracy baseline | 0.4375 | 5 (0.4375 / 0.4375 / 0.4375) | full |
 | answer accuracy final | n/a | n/a | full |

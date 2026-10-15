@@ -1,7 +1,7 @@
 {
-  "git_commit": "2101abf478e8993b9a6f3aac36ca2980d1eeb68f",
+  "git_commit": "f2b37b702998c77c8446fefb65c16ca1280e6b97",
   "metrics": {
-    "segmentation_exact_rate": 0.15
+    "segmentation_exact_rate": 1.0
   },
-  "written_utc": "2026-10-15T00:36:08Z"
+  "written_utc": "2026-10-15T18:43:43Z"
 }

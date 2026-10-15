@@ -12,11 +12,11 @@
     "rerank.jsonl.gz": "4683c8bd8d92188b2dd9e84931f0d096031b90c5c831300c802dc0a96f51e1de",
     "snapshot.jsonl.gz": "8e1ec205eebe5de24764e855de466b6a0cc3f43c7bd7aab3b3f1a18652e76708"
   },
-  "git_commit": "2101abf478e8993b9a6f3aac36ca2980d1eeb68f",
-  "recorded_utc": "2026-10-15T00:35:34Z",
+  "git_commit": "f2b37b702998c77c8446fefb65c16ca1280e6b97",
+  "recorded_utc": "2026-10-15T18:43:12Z",
   "stage_versions": {
     "chunk": 1,
     "embed": 1,
-    "segment": 1
+    "segment": 2
   }
 }
