@@ -94,6 +94,7 @@ markers = [
 
 [tool.coverage.run]
 source = ["minutes"]
+core = "sysmon"
 omit = [
   "src/minutes/models/embedder.py",
   "src/minutes/models/reranker.py",
