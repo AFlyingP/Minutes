@@ -13,7 +13,7 @@ from psycopg.rows import TupleRow
 from minutes import corpus, db
 from minutes.answer.pipeline import answer as answer_question
 from minutes.config import Corpus, corpus_database_url, get_settings
-from minutes.errors import ValidationError
+from minutes.errors import ConfigError, ValidationError
 from minutes.evals.grader import grade_answer, grade_support
 from minutes.evals.metrics import (
     mean_or_none,
@@ -336,13 +336,21 @@ def run_suite(
     only: set[str] | None = None,
 ) -> dict[str, object]:
     """Run registered evaluation sections and merge their results into a JSON file."""
-    names = list(SECTIONS) if only is None else sorted(only)
+    available = {"retrieval", "segmentation"} if suite == "gate" else set(SECTIONS)
+    if only is None and suite == "gate":
+        names = ["retrieval", "segmentation"]
+    elif only is None:
+        names = list(SECTIONS)
+    else:
+        names = sorted(only)
     for name in names:
-        if name not in SECTIONS:
+        if name not in available:
             raise ValidationError(f"unknown section {name}")
     settings = get_settings()
     if settings.corpus != "fixture":
         store.require_frozen()
+    if suite == "gate" and not store.is_frozen(labels_dir):
+        raise ConfigError("label files are not frozen")
     labels = load_labels(labels_dir)
     with db.connect(corpus_database_url(settings.corpus)) as conn:
         context = EvalContext(suite, settings.corpus, conn, labels, controls)

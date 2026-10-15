@@ -18,7 +18,7 @@ from minutes import corpus, db, probe, queue, worker
 from minutes.answer.pipeline import answer
 from minutes.api.app import create_app
 from minutes.api.schemas import Chunker, Pipeline, SearchMode
-from minutes.config import Corpus, corpus_database_url, get_settings, load_cities
+from minutes.config import ROOT, Corpus, corpus_database_url, get_settings, load_cities
 from minutes.corpus import assert_minimums, corpus_stats
 from minutes.errors import (
     ConfigError,
@@ -29,6 +29,7 @@ from minutes.errors import (
     MinutesError,
     NotFoundError,
 )
+from minutes.evals import gate as eval_gate
 from minutes.evals import grader as eval_grader
 from minutes.evals import report as eval_report
 from minutes.evals import runner as eval_runner
@@ -85,9 +86,17 @@ app.add_typer(labels_app, name="labels")
 app.add_typer(cache_app, name="cache")
 app.add_typer(eval_app, name="eval")
 
-LABELS_DIR = Path("eval/labels")
-RESULTS_FILE = Path("eval/results/full.json")
+LABELS_DIR = ROOT / "eval" / "labels"
+RESULTS_FILE = ROOT / "eval" / "results" / "full.json"
 LABEL_RULES = PRODUCTION_RULES
+GATE_RECORDING_DIR = ROOT / "eval" / "gate"
+GATE_BASELINE_FILE = ROOT / "eval" / "baseline.json"
+# None means the gate results file under the configured data directory
+GATE_RESULTS_FILE: Path | None = None
+
+
+def _gate_results_path() -> Path:
+    return GATE_RESULTS_FILE or eval_gate.gate_results_path()
 
 
 @eval_app.command("run")
@@ -95,13 +104,11 @@ def eval_run(
     suite: Annotated[Literal["gate", "full"], typer.Option("--suite")] = "gate",
     controls: Annotated[Literal["on", "off"], typer.Option("--controls")] = "on",
     only: Annotated[str | None, typer.Option("--only")] = None,
-    labels_dir: Annotated[Path, typer.Option("--labels-dir")] = Path("eval/labels"),
+    labels_dir: Annotated[Path, typer.Option("--labels-dir")] = LABELS_DIR,
     out: Annotated[Path | None, typer.Option("--out")] = None,
 ) -> None:
     """Run the registered evaluation sections and print their table."""
-    output = out or (
-        Path("eval/results/full.json") if suite == "full" else Path("data/gate_results.json")
-    )
+    output = out or (RESULTS_FILE if suite == "full" else _gate_results_path())
     selected = set(only.split(",")) if only is not None else None
     results = eval_runner.run_suite(
         suite,
@@ -133,14 +140,48 @@ def eval_validate_grader() -> None:
         raise typer.Exit(1)
 
 
+@eval_app.command("record")
+def eval_record() -> None:
+    recorder = eval_gate.record()
+    typer.echo(
+        f"recorded {len(recorder.llm)} llm, {len(recorder.embeddings)} embeddings, "
+        f"{len(recorder.rerank)} rerank"
+    )
+
+
+@eval_app.command("baseline")
+def eval_baseline(write: Annotated[bool, typer.Option("--write")] = False) -> None:
+    results_path = _gate_results_path()
+    if not results_path.is_file():
+        raise ConfigError("missing gate results; run uv run minutes eval gate")
+    results = cast(dict[str, object], json.loads(results_path.read_text(encoding="utf-8")))
+    metrics = eval_gate._baseline_metrics(results)
+    for name, value in metrics.items():
+        typer.echo(f"{name}={value:g}")
+    if write:
+        eval_gate.write_baseline(results_path, GATE_BASELINE_FILE)
+
+
+@eval_app.command("gate")
+def eval_gate_command() -> None:
+    raise typer.Exit(
+        eval_gate.run_gate(
+            recording_dir=GATE_RECORDING_DIR,
+            baseline_path=GATE_BASELINE_FILE,
+            labels_dir=LABELS_DIR,
+            results_path=_gate_results_path(),
+        )
+    )
+
+
 @eval_app.command("report")
 def eval_report_command() -> None:
     """Write the Markdown table from the full evaluation results file."""
-    results_path = Path("eval/results/full.json")
+    results_path = RESULTS_FILE
     if not results_path.is_file():
         raise NotFoundError("missing eval/results/full.json")
     results = cast(dict[str, object], json.loads(results_path.read_text(encoding="utf-8")))
-    report_path = Path("eval/results/full.md")
+    report_path = ROOT / "eval" / "results" / "full.md"
     report_path.write_text(eval_report.render_table(results), encoding="utf-8", newline="\n")
     typer.echo(f"updated {report_path.as_posix()}")
 

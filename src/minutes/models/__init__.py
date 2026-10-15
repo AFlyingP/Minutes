@@ -38,6 +38,16 @@ class OcrEngine(Protocol):
     def read(self, image: Image.Image, hint: str) -> list[OcrWord]: ...
 
 
+class ModelRecorder(Protocol):
+    def embedder(self, model: Embedder) -> Embedder: ...
+
+    def reranker(self, model: Reranker) -> Reranker: ...
+
+
+# set by the gate recorder while it records a run; every model handed out is wrapped by it
+recorder: ModelRecorder | None = None
+
+
 def _require_cuda() -> None:
     try:
         torch = importlib.import_module("torch")
@@ -48,6 +58,16 @@ def _require_cuda() -> None:
 
 
 def get_embedder() -> Embedder:
+    model = _embedder_for_mode()
+    return model if recorder is None else recorder.embedder(model)
+
+
+def get_reranker() -> Reranker:
+    model = _reranker_for_mode()
+    return model if recorder is None else recorder.reranker(model)
+
+
+def _embedder_for_mode() -> Embedder:
     mode = get_settings().models_mode
     if mode == "stub":
         from minutes.models.stubs import StubEmbedder
@@ -58,10 +78,14 @@ def get_embedder() -> Embedder:
         from minutes.models.embedder import GpuEmbedder
 
         return GpuEmbedder()
+    if mode == "replay":
+        from minutes.evals.gate import REPLAY_DIR, ReplayEmbedder
+
+        return ReplayEmbedder(REPLAY_DIR / "embeddings.npz")
     raise ConfigError(f"models mode {mode} is not available")
 
 
-def get_reranker() -> Reranker:
+def _reranker_for_mode() -> Reranker:
     mode = get_settings().models_mode
     if mode == "stub":
         from minutes.models.stubs import StubReranker
@@ -72,6 +96,10 @@ def get_reranker() -> Reranker:
         from minutes.models.reranker import GpuReranker
 
         return GpuReranker()
+    if mode == "replay":
+        from minutes.evals.gate import REPLAY_DIR, ReplayReranker
+
+        return ReplayReranker(REPLAY_DIR / "rerank.jsonl.gz")
     raise ConfigError(f"models mode {mode} is not available")
 
 

@@ -1,8 +1,13 @@
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Protocol
+from pathlib import Path
+from typing import TYPE_CHECKING, Protocol
 
 from minutes.config import ROOT, get_settings
 from minutes.errors import BudgetExceeded
+
+if TYPE_CHECKING:
+    from minutes.llm.cache import DiskCache
 
 
 @dataclass(frozen=True)
@@ -46,6 +51,11 @@ class LLMClient(Protocol):
     ) -> ChatResult: ...
 
 
+REPLAY_DIR = ROOT / "eval" / "gate"
+# set by the gate recorder while it records a run; builds the live cache in place of DiskCache
+cache_recorder: "Callable[[Path], DiskCache] | None" = None
+
+
 def get_client() -> LLMClient:
     settings = get_settings()
     if settings.llm_mode == "stub":
@@ -56,5 +66,7 @@ def get_client() -> LLMClient:
     from minutes.llm.client import ThinClient
 
     if settings.llm_mode == "live":
-        return ThinClient(cache=DiskCache(settings.data_dir / "cache" / "llm"))
-    return ThinClient(cache=ReplayStore(ROOT / "eval" / "gate" / "llm.jsonl.gz"))
+        root = settings.data_dir / "cache" / "llm"
+        cache = DiskCache(root) if cache_recorder is None else cache_recorder(root)
+        return ThinClient(cache=cache)
+    return ThinClient(cache=ReplayStore(REPLAY_DIR / "llm.jsonl.gz"))
