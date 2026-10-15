@@ -9,6 +9,7 @@ from minutes.errors import ValidationError
 from minutes.models import get_embedder, get_reranker
 
 CANDIDATES = 50
+SPAN_BUDGET = 9000
 
 # any query word may match; ts_rank_cd puts chunks that match more of them first
 KEYWORD_QUERY = """
@@ -45,11 +46,19 @@ LIMIT %(limit)s
 CHUNK_ROWS = """
 SELECT c.id, c.document_id, c.unit_index, u.unit_kind, c.start_offset, c.end_offset,
        c.text, c.item_id, c.city_id, c.body, c.meeting_date, c.doc_kind, u.start_ms,
-       i.identifier, i.title
+       i.identifier, i.title, i.linked_item_id
 FROM chunks c
 LEFT JOIN items i ON i.id = c.item_id
 JOIN units u ON u.document_id = c.document_id AND u.unit_index = c.unit_index
 WHERE c.id = ANY(%s)
+"""
+
+ITEM_SPANS = """
+SELECT c.id, c.document_id, c.unit_index, u.unit_kind, c.start_offset, c.end_offset, c.text
+FROM chunks c
+JOIN units u ON u.document_id = c.document_id AND u.unit_index = c.unit_index
+WHERE c.chunker = 'item' AND c.item_id = ANY(%(items)s) AND c.id != %(matched)s
+ORDER BY (c.item_id = %(item)s) DESC, c.ordinal, c.id
 """
 
 
@@ -166,11 +175,27 @@ def search(
             key=lambda pair: (-pair[1], pair[0]),
         )
     hits: list[Hit] = []
+    seen_items: set[int] = set()
     for chunk_id, score in ranked:
         row = chunks[chunk_id]
         item_id, city_id, body, meeting_date, doc_kind, start_ms = row[7:13]
-        identifier, title = row[13:]
+        identifier, title, linked_item_id = row[13:]
+        if chunker == "item" and item_id is not None and item_id in seen_items:
+            continue
         spans = [Span(*row[:7])]
+        if chunker == "item" and item_id is not None:
+            seen_items.add(item_id)
+            span_rows = conn.execute(
+                ITEM_SPANS,
+                {"items": [item_id, linked_item_id], "matched": chunk_id, "item": item_id},
+            ).fetchall()
+            length = len(spans[0].text)
+            for span_row in span_rows:
+                span = Span(*span_row)
+                if length + len(span.text) > SPAN_BUDGET:
+                    break
+                spans.append(span)
+                length += len(span.text)
         hits.append(
             Hit(
                 rank=len(hits) + 1,

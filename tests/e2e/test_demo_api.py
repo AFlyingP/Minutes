@@ -6,6 +6,25 @@ from minutes.api.app import create_app
 pytestmark = pytest.mark.e2e
 
 
+def test_demo_step_3_search(fixture_corpus: str) -> None:
+    client = TestClient(create_app())
+    response = client.get("/api/search", params={"q": "sidewalk repair contract", "city": "birch"})
+    assert response.status_code == 200
+    result = response.json()
+    assert result["mode"] == "hybrid_rerank"
+    assert result["chunker"] == "item"
+    hit = result["hits"][0]
+    assert hit["rank"] == 1
+    assert hit["heading"] == "Birch City Council, 2024-03-12, minutes, item 9.B"
+    assert "Granite Works Inc." in hit["snippet"]
+    assert hit["spans"][0]["label"] == "p. 1"
+    assert {(span["document_id"], span["unit_index"]) for span in hit["spans"]} >= {
+        ("birch-minutes-201", 1),
+        ("birch-minutes-201", 2),
+        ("birch-agenda-201", 2),
+    }
+
+
 def test_search_then_ask_returns_cited_answer(fixture_corpus: str) -> None:
     client = TestClient(create_app())
 

@@ -9,7 +9,7 @@ from psycopg.rows import TupleRow
 from minutes.api.app import create_app
 from minutes.errors import ValidationError
 from minutes.models.stubs import StubReranker
-from minutes.retrieval.search import Filters, hit_heading, rrf, search, span_label
+from minutes.retrieval.search import SPAN_BUDGET, Filters, hit_heading, rrf, search, span_label
 
 pytestmark = pytest.mark.integration
 Connection = psycopg.Connection[TupleRow]
@@ -90,6 +90,98 @@ def test_rerank_orders_by_reranker_score_then_chunk_id(
     assert len(set(scores)) < len(scores)
     order = [(-hit.score, hit.chunk_id) for hit in hits]
     assert order == sorted(order)
+
+
+def test_item_hit_includes_other_page_and_linked_agenda_item(
+    fixture_corpus: str, conn: Connection
+) -> None:
+    hits = search(conn, QUERY, Filters(city="birch"), mode="hybrid_rerank", chunker="item", k=10)
+    hit = next(
+        hit
+        for hit in hits
+        if hit.document_id == "birch-minutes-201" and hit.item_identifier == "9.B"
+    )
+    assert hit.spans[0].chunk_id == hit.chunk_id
+    assert hit.spans[0].unit_index == 1
+    assert {(span.document_id, span.unit_index) for span in hit.spans} >= {
+        ("birch-minutes-201", 1),
+        ("birch-minutes-201", 2),
+        ("birch-agenda-201", 2),
+    }
+    assert any("Ayes: Gray, Hale, Ivers, Jones" in span.text for span in hit.spans)
+    rows = conn.execute(
+        "SELECT id FROM chunks WHERE chunker = 'item' AND item_id IN "
+        "(SELECT id FROM items WHERE id = %s OR id = "
+        "(SELECT linked_item_id FROM items WHERE id = %s)) "
+        "ORDER BY (item_id = %s) DESC, ordinal, id",
+        (hit.item_id, hit.item_id, hit.item_id),
+    ).fetchall()
+    assert [span.chunk_id for span in hit.spans] == [hit.chunk_id] + [
+        row[0] for row in rows if row[0] != hit.chunk_id
+    ]
+
+
+@pytest.mark.parametrize("mode", MODES)
+def test_item_hits_are_deduplicated_by_item(
+    fixture_corpus: str, conn: Connection, mode: Mode
+) -> None:
+    hits = search(conn, "meeting sidewalk vote", Filters(), mode=mode, chunker="item", k=50)
+    item_ids = [hit.item_id for hit in hits if hit.item_id is not None]
+    assert item_ids
+    assert len(item_ids) == len(set(item_ids))
+    assert [hit.rank for hit in hits] == list(range(1, len(hits) + 1))
+
+
+@pytest.mark.parametrize(
+    ("lengths", "matched", "included"),
+    [([1800] * 6, 2, [2, 0, 1, 3, 4]), ([1200, 8000, 1], 0, [0]), ([9001, 1], 0, [0])],
+)
+def test_span_budget_caps_at_9000_characters_and_keeps_matched_chunk(
+    fixture_corpus: str,
+    conn: Connection,
+    lengths: list[int],
+    matched: int,
+    included: list[int],
+) -> None:
+    template = conn.execute(
+        "SELECT c.item_id, c.city_id, c.body, c.meeting_date, c.doc_kind "
+        "FROM chunks c JOIN items i ON i.id = c.item_id "
+        "WHERE c.document_id = 'birch-minutes-201' AND c.chunker = 'item' "
+        "AND i.identifier = '9.B' ORDER BY c.ordinal LIMIT 1"
+    ).fetchone()
+    assert template is not None
+    item_id = template[0]
+    conn.execute("UPDATE items SET linked_item_id = NULL WHERE id = %s", (item_id,))
+    conn.execute("DELETE FROM chunks WHERE item_id = %s", (item_id,))
+    texts = [
+        ("budgetneedle " if index == matched else "x").ljust(length, "x")
+        for index, length in enumerate(lengths)
+    ]
+    assert sum(len(text) for text in texts) > SPAN_BUDGET
+    conn.execute(
+        "UPDATE units SET text = %s WHERE document_id = 'birch-minutes-201' AND unit_index = 1",
+        ("".join(texts),),
+    )
+    ids = []
+    offset = 0
+    for index, text in enumerate(texts):
+        row = conn.execute(
+            "INSERT INTO chunks (document_id, unit_index, item_id, chunker, ordinal, "
+            "start_offset, end_offset, text, embed_text, city_id, body, meeting_date, doc_kind) "
+            "VALUES ('birch-minutes-201', 1, %s, 'item', %s, %s, %s, %s, %s, %s, %s, %s, %s) "
+            "RETURNING id",
+            (item_id, 10000 + index, offset, offset + len(text), text, text, *template[1:]),
+        ).fetchone()
+        assert row is not None
+        ids.append(row[0])
+        offset += len(text)
+    hits = search(conn, "budgetneedle", Filters(), mode="keyword", chunker="item", k=10)
+    assert len(hits) == 1
+    hit = hits[0]
+    assert hit.chunk_id == ids[matched]
+    assert [span.chunk_id for span in hit.spans] == [ids[index] for index in included]
+    assert sum(len(span.text) for span in hit.spans) == sum(lengths[index] for index in included)
+    assert sum(len(span.text) for span in hit.spans) <= max(SPAN_BUDGET, lengths[matched])
 
 
 @pytest.mark.parametrize("mode", MODES)
