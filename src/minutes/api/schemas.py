@@ -8,6 +8,7 @@ from minutes.labels.schema import Label, LabelType
 
 DocKind = Literal["agenda", "minutes", "transcript"]
 UnitKind = Literal["page", "segment"]
+FactCollection = Literal["votes", "motions", "ordinances", "amounts", "statements"]
 SearchMode = Literal["keyword", "vector", "hybrid", "hybrid_rerank"]
 Chunker = Literal["fixed", "item"]
 Pipeline = Literal["final", "baseline", "langgraph"]
@@ -128,6 +129,29 @@ class DocumentSummaryOut(BaseModel):
 class DocumentsOut(BaseModel):
     total: int
     documents: list[DocumentSummaryOut]
+
+
+class FactRowOut(BaseModel):
+    id: int
+    document_id: str
+    meeting_id: str
+    city_id: str
+    body: str
+    meeting_date: date
+    doc_kind: DocKind
+    unit_index: int
+    unit_kind: UnitKind
+    quote_start: int | None
+    quote_end: int | None
+    quote: str
+    label: str
+    data: dict[str, object]
+
+
+class FactsOut(BaseModel):
+    kind: FactCollection
+    total: int
+    rows: list[FactRowOut]
 
 
 class MeetingSummaryOut(BaseModel):

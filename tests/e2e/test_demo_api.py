@@ -39,3 +39,20 @@ def test_search_then_ask_returns_cited_answer(fixture_corpus: str) -> None:
     for sentence in answer["sentences"]:
         assert sentence["citations"]
         assert any(documents[n].startswith("birch-") for n in sentence["citations"])
+
+
+def test_demo_step_5_facts(fixture_corpus: str) -> None:
+    client = TestClient(create_app())
+    response = client.get("/api/facts/votes", params={"city": "birch"})
+
+    assert response.status_code == 200
+    result = response.json()
+    assert result["total"] == 4
+    assert result["rows"][0]["document_id"] == "birch-minutes-202"
+    vote = next(
+        row
+        for row in result["rows"]
+        if row["data"].get("subject_identifier") == "RESOLUTION 2024-07"
+    )
+    assert vote["data"]["ayes"] == 4
+    assert vote["label"] == "p. 2"
