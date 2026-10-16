@@ -2,6 +2,8 @@ import json
 import subprocess
 from collections import Counter
 from collections.abc import Callable
+from concurrent.futures import Future, ThreadPoolExecutor, as_completed
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from time import perf_counter
@@ -13,7 +15,7 @@ from psycopg.rows import TupleRow
 from minutes import corpus, db
 from minutes.answer.pipeline import answer as answer_question
 from minutes.config import Corpus, corpus_database_url, get_settings
-from minutes.errors import ConfigError, ValidationError
+from minutes.errors import ConfigError, LLMOutputError, LLMTransportError, ValidationError
 from minutes.evals.grader import grade_answer, grade_support
 from minutes.evals.metrics import (
     mean_or_none,
@@ -22,16 +24,20 @@ from minutes.evals.metrics import (
     segmentation_metrics,
     summarize_runs,
 )
-from minutes.ingest import quality
+from minutes.extract import extractor
+from minutes.extract.verify import verify
+from minutes.ingest import pipeline, quality
 from minutes.labels import export, store
 from minutes.labels.schema import (
     AgendaCount,
+    ExtractionCase,
     Label,
     LabelType,
     QuestionAnswerable,
     QuestionUnanswerable,
     parse_payload,
 )
+from minutes.log import get_logger
 from minutes.retrieval.search import Filters, Hit, search
 
 Labels = list[Label]
@@ -41,6 +47,24 @@ Suite = Literal["gate", "full"]
 Mode = Literal["keyword", "vector", "hybrid", "hybrid_rerank"]
 Chunker = Literal["fixed", "item"]
 LABEL_TYPES: tuple[LabelType, ...] = ("question", "agenda_count", "extraction", "agent_task")
+_LOG = get_logger("evals")
+
+
+@dataclass(frozen=True)
+class _ExtractedFact:
+    kind: str
+    data: dict[str, object]
+    unit_index: int
+    quote_start: int
+    quote_end: int
+
+
+@dataclass(frozen=True)
+class _ExtractionDocumentResult:
+    document_id: str
+    correct: dict[int, dict[str, bool]]
+    rejected: int
+    produced: int
 
 
 class EvalContext:
@@ -219,6 +243,209 @@ def _segmentation(context: EvalContext) -> Result:
     }
 
 
+def _last_token(value: object) -> str | None:
+    if value is None:
+        return None
+    words = str(value).strip().split()
+    return words[-1].casefold() if words else ""
+
+
+def _same_record(kind: str, predicted: dict[str, object], gold: dict[str, object]) -> bool:
+    if kind == "motion":
+        return (
+            _last_token(predicted["mover"]) == _last_token(gold["mover"])
+            and _last_token(predicted["seconder"]) == _last_token(gold["seconder"])
+            and str(predicted["outcome"]).strip().casefold()
+            == str(gold["outcome"]).strip().casefold()
+        )
+    if kind == "vote":
+        if (
+            any(predicted[field] != gold[field] for field in ("ayes", "noes", "abstain", "absent"))
+            or str(predicted["outcome"]).strip().casefold()
+            != str(gold["outcome"]).strip().casefold()
+        ):
+            return False
+        gold_members = cast(list[dict[str, object]], gold["members"])
+        if not gold_members:
+            return True
+        predicted_members = cast(list[dict[str, object]], predicted["members"])
+        return {
+            (_last_token(member["name"]), str(member["value"]).casefold())
+            for member in predicted_members
+        } == {
+            (_last_token(member["name"]), str(member["value"]).casefold())
+            for member in gold_members
+        }
+    if kind == "ordinance":
+        predicted_identifier = "".join(str(predicted["identifier"]).split()).casefold()
+        gold_identifier = "".join(str(gold["identifier"]).split()).casefold()
+        return (
+            predicted_identifier == gold_identifier
+            and str(predicted["status"]).strip().casefold()
+            == str(gold["status"]).strip().casefold()
+        )
+    if kind == "amount":
+        predicted_amount = cast(float | int, predicted["amount_usd"])
+        gold_amount = cast(float | int, gold["amount_usd"])
+        return abs(float(predicted_amount) - float(gold_amount)) <= 0.005
+    if kind == "statement":
+        return _last_token(predicted["speaker"]) == _last_token(gold["speaker"])
+    raise ValueError(f"unknown extraction kind {kind}")
+
+
+def _extract_document(
+    document_id: str, cases: list[tuple[Label, ExtractionCase]], database_url: str
+) -> _ExtractionDocumentResult:
+    with db.connect(database_url) as conn:
+        row = conn.execute(
+            "SELECT d.kind, c.name, m.body, m.meeting_date FROM documents d "
+            "JOIN meetings m ON m.id = d.meeting_id JOIN cities c ON c.id = d.city_id "
+            "WHERE d.id = %s",
+            (document_id,),
+        ).fetchone()
+        if row is None:
+            raise ValidationError(f"unknown extraction document {document_id}")
+        document_kind, city, body, meeting_date = row
+        items = extractor.item_texts(conn, document_id)
+        units = dict(
+            conn.execute(
+                "SELECT unit_index, text FROM units WHERE document_id = %s", (document_id,)
+            ).fetchall()
+        )
+        item_bounds = {
+            item_id: (start_unit, start_offset, end_unit, end_offset)
+            for item_id, start_unit, start_offset, end_unit, end_offset in conn.execute(
+                "SELECT id, start_unit, start_offset, end_unit, end_offset FROM items "
+                "WHERE document_id = %s",
+                (document_id,),
+            ).fetchall()
+        }
+    items_by_id = {item.item_id: item for item in items}
+    correct: dict[int, dict[str, bool]] = {}
+    rejected = produced = 0
+    for sample_index in range(5):
+        predictions: list[_ExtractedFact] = []
+        try:
+            raw_facts = extractor.extract_items(
+                items,
+                controls=True,
+                sample_index=sample_index,
+                city=city,
+                body=body,
+                meeting_date=meeting_date.isoformat(),
+                document_kind=document_kind,
+            )
+        except (LLMOutputError, LLMTransportError) as err:
+            _LOG.error(
+                "extraction evaluation failed",
+                extra={
+                    "event": "extraction_evaluation_failed",
+                    "fields": {
+                        "document_id": document_id,
+                        "sample_index": sample_index,
+                        "error": str(err)[:200],
+                    },
+                },
+            )
+            raw_facts = []
+        for fact in raw_facts:
+            produced += 1
+            item = items_by_id.get(fact.item_id) if fact.item_id is not None else None
+            if item is None or not fact.data:
+                rejected += 1
+                continue
+            result = verify(fact.kind, fact.data | {"quote": fact.quote}, item.text)
+            if not result.ok or result.quote_start is None or result.quote_end is None:
+                rejected += 1
+                continue
+            unit_index, quote_start, quote_end = extractor.quote_unit_offsets(
+                item,
+                result.quote_start,
+                result.quote_end,
+                item_bounds[item.item_id],
+                units,
+            )
+            predictions.append(
+                _ExtractedFact(fact.kind, fact.data, unit_index, quote_start, quote_end)
+            )
+        correct[sample_index] = {}
+        for label, case in cases:
+            passage = case.passage
+            correct[sample_index][label.id] = any(
+                prediction.kind == case.kind
+                and prediction.unit_index == passage.unit_index
+                and prediction.quote_start < passage.end
+                and prediction.quote_end > passage.start
+                and _same_record(case.kind, prediction.data, case.record)
+                for prediction in predictions
+            )
+    return _ExtractionDocumentResult(document_id, correct, rejected, produced)
+
+
+def _extraction(context: EvalContext) -> Result:
+    cases: list[tuple[Label, ExtractionCase]] = []
+    for label in context.labels:
+        if label.type == "extraction":
+            cases.append((label, cast(ExtractionCase, parse_payload(label.type, label.payload))))
+    by_document: dict[str, list[tuple[Label, ExtractionCase]]] = {}
+    for label, case in cases:
+        by_document.setdefault(case.passage.document_id, []).append((label, case))
+    database_url = corpus_database_url(context.corpus)
+    results: list[_ExtractionDocumentResult] = []
+    with ThreadPoolExecutor(max_workers=pipeline.EXTRACTION_WORKERS) as pool:
+        futures: dict[Future[_ExtractionDocumentResult], str] = {
+            pool.submit(_extract_document, document_id, document_cases, database_url): document_id
+            for document_id, document_cases in sorted(by_document.items())
+        }
+        for future in as_completed(futures):
+            results.append(future.result())
+    results.sort(key=lambda result: result.document_id)
+
+    correctness: dict[int, dict[str, bool]] = {sample_index: {} for sample_index in range(5)}
+    rejected = sum(result.rejected for result in results)
+    produced = sum(result.produced for result in results)
+    for result in results:
+        for sample_index, values in result.correct.items():
+            correctness[sample_index].update(values)
+
+    def accuracy(selected: list[tuple[Label, ExtractionCase]], sample_index: int) -> float | None:
+        if not selected:
+            return None
+        return sum(correctness[sample_index].get(label.id, False) for label, _ in selected) / len(
+            selected
+        )
+
+    overall = summarize_runs([accuracy(cases, sample_index) for sample_index in range(5)])
+    per_kind = {
+        kind: summarize_runs(
+            [
+                accuracy(
+                    [(label, case) for label, case in cases if case.kind == kind], sample_index
+                )
+                for sample_index in range(5)
+            ]
+        )
+        for kind in sorted({case.kind for _, case in cases})
+    }
+    per_city = {
+        city: summarize_runs(
+            [
+                accuracy(
+                    [(label, case) for label, case in cases if label.city == city], sample_index
+                )
+                for sample_index in range(5)
+            ]
+        )
+        for city in sorted({label.city for label, _ in cases})
+    }
+    return {
+        "overall": overall,
+        "per_kind": per_kind,
+        "per_city": per_city,
+        "verifier_reject_rate": rejected / produced if produced else 0.0,
+    }
+
+
 def _answers(context: EvalContext) -> Result:
     if context.suite != "full":
         return {}
@@ -296,6 +523,7 @@ def _answers(context: EvalContext) -> Result:
 SECTIONS: dict[str, Callable[[EvalContext], Result]] = {
     "retrieval": _retrieval,
     "segmentation": _segmentation,
+    "extraction": _extraction,
     "answers": _answers,
 }
 
@@ -345,9 +573,9 @@ def run_suite(
     only: set[str] | None = None,
 ) -> dict[str, object]:
     """Run registered evaluation sections and merge their results into a JSON file."""
-    available = {"retrieval", "segmentation"} if suite == "gate" else set(SECTIONS)
+    available = {"retrieval", "segmentation", "extraction"} if suite == "gate" else set(SECTIONS)
     if only is None and suite == "gate":
-        names = ["retrieval", "segmentation"]
+        names = ["retrieval", "segmentation", "extraction"]
     elif only is None:
         names = list(SECTIONS)
     else:

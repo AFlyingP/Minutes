@@ -110,15 +110,15 @@ def test_response_has_correlation_id_header(client: TestClient) -> None:
     assert re.fullmatch(r"[0-9a-f]{32}", replaced.headers["X-Correlation-ID"])
 
 
-def test_extract_stage_writes_unverified_facts(
+def test_extract_stage_writes_verified_facts(
     fixture_corpus: str, conn: psycopg.Connection[TupleRow]
 ) -> None:
     row = conn.execute(
         "SELECT count(*), count(*) FILTER (WHERE verified) FROM facts WHERE kind = 'vote'"
     ).fetchone()
     assert row is not None
-    assert row[0] >= 5
-    assert row[1] == 0
+    assert row[0] >= 10
+    assert row[1] == row[0]
 
 
 def test_ask_declines_when_nothing_is_retrieved(client: TestClient) -> None:

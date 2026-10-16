@@ -1,6 +1,11 @@
 import hashlib
 import json
+import logging
+import os
+import socket
+import threading
 from collections.abc import Callable
+from concurrent.futures import Future, ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from datetime import date
 from typing import Literal
@@ -9,29 +14,61 @@ import psycopg
 from psycopg.rows import TupleRow
 from psycopg.types.json import Jsonb
 
-from minutes import db
+from minutes import db, queue
 from minutes.config import CONFIG_DIR, Corpus, get_settings, load_cities
-from minutes.errors import NotFoundError, StageError
+from minutes.errors import (
+    LLMQuotaError,
+    NotFoundError,
+    PermanentStageError,
+    SourceError,
+    StageError,
+)
 from minutes.extract import extractor
 from minutes.ingest import chunk, download, embed, ocr, parse, segment
 from minutes.labels import store
+from minutes.log import bind_correlation_id
 from minutes.sources import get_source
 
 Connection = psycopg.Connection[TupleRow]
 
 STAGES: tuple[str, ...] = ("download", "parse", "ocr", "segment", "chunk", "embed", "extract")
+EXTRACTION_WORKERS = 8
 STAGE_VERSIONS: dict[str, int] = {stage: 1 for stage in STAGES} | {
     "parse": 5,
     "segment": 2,
     "chunk": 2,
+    "extract": 2,
 }
 LABEL_GATED_STAGES = ("segment", "chunk", "embed", "extract")
+_LOG = logging.getLogger("minutes.ingest")
 
 
 @dataclass(frozen=True)
 class StageResult:
     status: Literal["done", "skipped"]
     detail: dict[str, object] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class ExtractPoolSummary:
+    done: int
+    skipped: int
+    failed: int
+    dead: int
+
+
+@dataclass(frozen=True)
+class _ExtractDocumentResult:
+    document_id: str
+    status: Literal["done", "skipped", "failed", "dead"]
+    error: str | None = None
+
+
+@dataclass(frozen=True)
+class _ExtractWorkerResult:
+    documents: list[_ExtractDocumentResult]
+    quota_error: LLMQuotaError | None = None
+    other_error: Exception | None = None
 
 
 def stage_input_hash(content_sha256: str, stage: str) -> str:
@@ -62,7 +99,13 @@ STAGE_FUNCTIONS: dict[str, Callable[[Connection, str], dict[str, object]]] = {
 
 
 def run_stage(
-    conn: Connection, stage: str, document_id: str, corpus: str, *, attempt: int = 1
+    conn: Connection,
+    stage: str,
+    document_id: str,
+    corpus: str,
+    *,
+    attempt: int = 1,
+    controls: bool = True,
 ) -> StageResult:
     """Run one stage for one document unless it already ran on the same input."""
     if stage in LABEL_GATED_STAGES and corpus != "fixture":
@@ -79,6 +122,8 @@ def run_stage(
         # nothing was downloaded for this document, so there is nothing to work on
         return StageResult("skipped")
     input_hash = stage_input_hash(content_sha256, stage)
+    if stage == "extract" and not controls:
+        input_hash = hashlib.sha256(f"{input_hash}|controls-off".encode()).hexdigest()
     if not should_run(conn, document_id, stage, input_hash):
         return StageResult("skipped")
     fault = get_settings().fault
@@ -86,7 +131,11 @@ def run_stage(
         _, fault_stage, fault_document, count = fault.split(":")
         if stage == fault_stage and document_id == fault_document and attempt <= int(count):
             raise StageError("injected fault")
-    detail = STAGE_FUNCTIONS[stage](conn, document_id)
+    detail = (
+        extractor.run(conn, document_id, controls=controls)
+        if stage == "extract"
+        else STAGE_FUNCTIONS[stage](conn, document_id)
+    )
     conn.execute(
         "INSERT INTO stage_runs (document_id, stage, input_sha256, status, detail) "
         "VALUES (%s, %s, %s, 'done', %s) "
@@ -95,6 +144,158 @@ def run_stage(
         (document_id, stage, input_hash, Jsonb(detail)),
     )
     return StageResult("done", detail)
+
+
+def _run_extract_worker(url: str, controls: bool, stop: threading.Event) -> _ExtractWorkerResult:
+    worker_id = f"{socket.gethostname()}-{os.getpid()}-{threading.get_ident()}"
+    documents: list[_ExtractDocumentResult] = []
+    quota_error: LLMQuotaError | None = None
+    other_error: Exception | None = None
+    with db.connect(url) as conn:
+        conn.execute("LISTEN minutes_jobs")
+        conn.commit()
+        while not stop.is_set():
+            with conn.transaction():
+                queue.requeue_stale(conn)
+                job = queue.claim(conn, worker_id, "extract")
+            if job is None:
+                with conn.transaction():
+                    pending = conn.execute(
+                        "SELECT EXISTS (SELECT 1 FROM jobs WHERE status IN ('queued', 'running') "
+                        "AND stage = 'extract')"
+                    ).fetchone()
+                    assert pending is not None
+                if not pending[0] or stop.is_set():
+                    break
+                # Finishing a job sends no notification, so poll again soon.
+                for _ in conn.notifies(timeout=0.5, stop_after=1):
+                    pass
+                continue
+
+            if stop.is_set():
+                with conn.transaction():
+                    queue.release(conn, job.id)
+                break
+
+            bind_correlation_id(hashlib.md5(f"job-{job.id}".encode()).hexdigest())
+            fields = {
+                "job_id": job.id,
+                "stage": job.stage,
+                "document_id": job.document_id,
+                "attempts": job.attempts,
+            }
+            try:
+                with conn.transaction():
+                    result = run_stage(
+                        conn,
+                        "extract",
+                        job.document_id,
+                        job.corpus,
+                        attempt=job.attempts,
+                        controls=controls,
+                    )
+                    queue.complete(conn, job.id)
+            except LLMQuotaError as err:
+                with conn.transaction():
+                    queue.release(conn, job.id)
+                _LOG.warning(
+                    "job released",
+                    extra={"event": "job_released", "fields": fields},
+                )
+                quota_error = err
+                stop.set()
+                break
+            except PermanentStageError as err:
+                with conn.transaction():
+                    conn.execute(
+                        "UPDATE documents SET status = 'failed', fail_reason = %s, "
+                        "updated_at = now() WHERE id = %s",
+                        (str(err), job.document_id),
+                    )
+                    queue.fail(conn, job.id, str(err), permanent=True)
+                _LOG.error(
+                    "job failed",
+                    extra={"event": "job_failed", "fields": {**fields, "error": str(err)[:200]}},
+                )
+                documents.append(_ExtractDocumentResult(job.document_id, "failed", str(err)))
+            except (StageError, SourceError) as err:
+                with conn.transaction():
+                    status = queue.fail(conn, job.id, str(err), permanent=False)
+                if status == "dead":
+                    _LOG.error(
+                        "job dead",
+                        extra={"event": "job_dead", "fields": {**fields, "error": str(err)[:200]}},
+                    )
+                    documents.append(_ExtractDocumentResult(job.document_id, "dead", str(err)))
+                elif status == "queued":
+                    _LOG.warning(
+                        "job retry",
+                        extra={"event": "job_retry", "fields": {**fields, "error": str(err)[:200]}},
+                    )
+            except Exception as err:
+                with conn.transaction():
+                    queue.release(conn, job.id)
+                other_error = err
+                stop.set()
+                break
+            else:
+                event = "job skipped" if result.status == "skipped" else "job done"
+                _LOG.info(
+                    event,
+                    extra={"event": event.replace(" ", "_"), "fields": fields},
+                )
+                documents.append(_ExtractDocumentResult(job.document_id, result.status))
+    return _ExtractWorkerResult(documents, quota_error, other_error)
+
+
+def run_extract_pool(
+    url: str, corpus: str, document_ids: list[str], *, controls: bool = True
+) -> ExtractPoolSummary:
+    """Run queued extraction jobs in independent connections and aggregate by document ID."""
+    with db.connect(url) as conn:
+        for document_id in sorted(set(document_ids)):
+            queue.enqueue(conn, "extract", document_id, corpus)
+
+    stop = threading.Event()
+    worker_results: list[_ExtractWorkerResult] = []
+    quota_error: LLMQuotaError | None = None
+    other_error: Exception | None = None
+    with ThreadPoolExecutor(max_workers=EXTRACTION_WORKERS) as pool:
+        futures: list[Future[_ExtractWorkerResult]] = [
+            pool.submit(_run_extract_worker, url, controls, stop) for _ in range(EXTRACTION_WORKERS)
+        ]
+        for future in as_completed(futures):
+            try:
+                worker_results.append(future.result())
+            except Exception as err:
+                stop.set()
+                other_error = other_error or err
+    results = [document for result in worker_results for document in result.documents]
+    results.sort(key=lambda result: result.document_id)
+    for worker_result in worker_results:
+        quota_error = quota_error or worker_result.quota_error
+        other_error = other_error or worker_result.other_error
+    for document_result in results:
+        if document_result.error is not None:
+            _LOG.error(
+                "extract stage failed",
+                extra={
+                    "event": "stage_failed",
+                    "fields": {
+                        "stage": "extract",
+                        "document_id": document_result.document_id,
+                        "error": document_result.error[:200],
+                    },
+                },
+            )
+    if quota_error is not None:
+        raise quota_error
+    if other_error is not None:
+        raise other_error
+    counts = {status: 0 for status in ("done", "skipped", "failed", "dead")}
+    for document_result in results:
+        counts[document_result.status] += 1
+    return ExtractPoolSummary(**counts)
 
 
 def documents_for(conn: Connection, corpus: str, city: str | None) -> list[str]:

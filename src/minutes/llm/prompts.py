@@ -32,8 +32,10 @@ Record kinds:
 - statement: a named person who spoke, and what they addressed.
 
 Rules:
+- Go through every item, one by one, and return every record it contains: each motion, each recorded vote, each ordinance, resolution, or council bill, each dollar amount, and each named person who spoke. One item often has several records of the same kind. Do not skip an item, and do not stop early.
 - For every record, copy a quote from the item that contains the evidence. The quote must be copied exactly, be one continuous run of text, and be at most 600 characters.
 - For a vote, the quote must include every line that lists ayes, noes, abstentions, and absences. The counts you give must equal what the quote shows. When names are listed without a number, count the names.
+- For an ordinance, give the identifier exactly as printed, including its type word (for example "RESOLUTION 2024-07", "ORDINANCE 1087B", "CB 120584", "Res 32093"), and quote the text that contains it. A resolution that is approved is "adopted"; an ordinance or council bill that is approved is "passed"; one that is continued or deferred is "held".
 - Set the "item" field to the number of the item the record comes from.
 - Fill exactly one of motion, vote, ordinance, amount, statement, matching "kind". Set the others to null.
 - Use null for anything the text does not state. Do not guess.

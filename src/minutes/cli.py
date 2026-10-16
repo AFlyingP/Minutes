@@ -77,6 +77,7 @@ corpus_app = typer.Typer(no_args_is_help=True)
 labels_app = typer.Typer(no_args_is_help=True)
 cache_app = typer.Typer(no_args_is_help=True)
 eval_app = typer.Typer(no_args_is_help=True)
+extract_app = typer.Typer(no_args_is_help=True)
 app.add_typer(ingest_app, name="ingest")
 app.add_typer(worker_app, name="worker")
 app.add_typer(jobs_app, name="jobs")
@@ -85,6 +86,7 @@ app.add_typer(corpus_app, name="corpus")
 app.add_typer(labels_app, name="labels")
 app.add_typer(cache_app, name="cache")
 app.add_typer(eval_app, name="eval")
+app.add_typer(extract_app, name="extract")
 
 LABELS_DIR = ROOT / "eval" / "labels"
 RESULTS_FILE = ROOT / "eval" / "results" / "full.json"
@@ -316,7 +318,7 @@ def ingest_discover(
     typer.echo(f"discovered {added} new documents")
 
 
-def summary_line(summary: worker.WorkerSummary) -> str:
+def summary_line(summary: worker.WorkerSummary | pipeline.ExtractPoolSummary) -> str:
     return (
         f"done {summary.done} skipped {summary.skipped} failed {summary.failed} dead {summary.dead}"
     )
@@ -349,13 +351,22 @@ def ingest_run(
         store.require_frozen(LABELS_DIR)
     totals = [0, 0, 0, 0]
     for stage in names:
+        result: worker.WorkerSummary | pipeline.ExtractPoolSummary
         with db.connect(corpus_database_url(used)) as conn:
-            for document_id in pipeline.documents_for(conn, used, city):
-                queue.enqueue(conn, stage, document_id, used)
-        try:
-            result = worker.run(used, drain=True, stage=stage)
-        except LLMQuotaError:
-            quota_pause()
+            documents = pipeline.documents_for(conn, used, city)
+            if stage != "extract":
+                for document_id in documents:
+                    queue.enqueue(conn, stage, document_id, used)
+        if stage == "extract":
+            try:
+                result = pipeline.run_extract_pool(corpus_database_url(used), used, documents)
+            except LLMQuotaError:
+                quota_pause()
+        else:
+            try:
+                result = worker.run(used, drain=True, stage=stage)
+            except LLMQuotaError:
+                quota_pause()
         typer.echo(f"{stage}: {summary_line(result)}")
         totals[0] += result.done
         totals[1] += result.skipped
@@ -363,6 +374,30 @@ def ingest_run(
         totals[3] += result.dead
     typer.echo(f"done {totals[0]} skipped {totals[1]} failed {totals[2]} dead {totals[3]}")
     if totals[3]:
+        raise typer.Exit(1)
+
+
+@extract_app.command("run")
+def extract_run(
+    city: Annotated[str | None, typer.Option()] = None,
+    no_controls: Annotated[bool, typer.Option("--no-controls")] = False,
+    corpus: CorpusOption = None,
+) -> None:
+    """Run structured extraction across the selected documents."""
+    used = use_corpus(corpus)
+    if used != "fixture":
+        store.require_frozen(LABELS_DIR)
+    with db.connect(corpus_database_url(used)) as conn:
+        documents = pipeline.documents_for(conn, used, city)
+    try:
+        result = pipeline.run_extract_pool(
+            corpus_database_url(used), used, documents, controls=not no_controls
+        )
+    except LLMQuotaError:
+        quota_pause()
+    typer.echo(f"extract: {summary_line(result)}")
+    typer.echo(summary_line(result))
+    if result.dead:
         raise typer.Exit(1)
 
 

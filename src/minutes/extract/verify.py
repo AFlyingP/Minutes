@@ -16,13 +16,17 @@ CATEGORY_WORDS = {
 }
 MEMBER_VALUES = {"ayes": "aye", "noes": "no", "abstain": "abstain", "absent": "absent"}
 LABEL = re.compile(
-    r"\b(?:" + "|".join(f"(?P<{c}>{labels})" for c, labels in CATEGORY_LABELS.items()) + r"):"
+    r"\b(?:" + "|".join(f"(?P<{c}>{labels})" for c, labels in CATEGORY_LABELS.items()) + r"):",
+    re.I,
 )
 TABLE_LINE = re.compile(
     r"\|\s*(?:" + "|".join(f"(?P<{c}>{words})" for c, words in CATEGORY_WORDS.items()) + r")\s*$",
     re.I,
 )
-AMOUNT = re.compile(r"\$\s?(\d[\d,]*(?:\.\d+)?)\s*(million|billion|thousand)?")
+TALLY = re.compile(
+    r"\((\d{1,2})\s*[-\u2013]\s*(\d{1,2})\s*[-\u2013]\s*(\d{1,2})\s*[-\u2013]\s*(\d{1,2})\)"
+)
+AMOUNT = re.compile(r"\$\s?(\d[\d,]*(?:\.\d+)?)\s*(million|billion|thousand|bn|[kKmMbB])?\b")
 
 
 @dataclass(frozen=True)
@@ -55,19 +59,40 @@ def names(listed: str) -> list[str]:
 
 def quoted_counts(quote: str) -> dict[str, int]:
     """Count votes from label lists and table rows in a quote."""
+    normalized = ws(quote)
     counts = dict.fromkeys(CATEGORY_LABELS, 0)
-    for category, listed in labelled(ws(quote)):
+    tally = TALLY.search(normalized)
+    if tally:
+        return {
+            category: int(count)
+            for category, count in zip(CATEGORY_LABELS, tally.groups(), strict=True)
+        }
+    for category, listed in labelled(normalized):
         number = re.search(r"\b(\d{1,2})\s*[-\u2013]", listed)
         counts[category] += int(number[1]) if number else len(names(listed))
     for line in quote.split("\n"):
         row = TABLE_LINE.search(ws(line))
         if row:
             counts[str(row.lastgroup)] += 1
+    for category, words in CATEGORY_WORDS.items():
+        counts[category] += len(re.findall(r"[-\u2013]\s*(?:" + words + r")\b", normalized, re.I))
     return counts
 
 
 def quoted_amounts(quote: str) -> list[float]:
-    multipliers = {None: 1, "million": 1e6, "billion": 1e9, "thousand": 1e3}
+    multipliers = {
+        None: 1,
+        "thousand": 1e3,
+        "k": 1e3,
+        "K": 1e3,
+        "million": 1e6,
+        "m": 1e6,
+        "M": 1e6,
+        "billion": 1e9,
+        "bn": 1e9,
+        "b": 1e9,
+        "B": 1e9,
+    }
     return [
         float(match[1].replace(",", "")) * multipliers[match[2]]
         for match in AMOUNT.finditer(ws(quote))
@@ -96,11 +121,19 @@ def verify(kind: str, data: dict[str, Any], item_text: str) -> VerifyResult:
     if kind == "vote":
         if any(data[category] != count for category, count in quoted_counts(data["quote"]).items()):
             error = "vote_count_mismatch"
-        elif data["members"] and any(
-            sum(member["value"] == value for member in data["members"]) != data[category]
-            for category, value in MEMBER_VALUES.items()
-        ):
-            error = "vote_members_mismatch"
+        elif data["members"]:
+            member_counts = {
+                category: sum(member["value"] == value for member in data["members"])
+                for category, value in MEMBER_VALUES.items()
+            }
+            full_member_list = len(data["members"]) == sum(
+                data[category] for category in MEMBER_VALUES
+            )
+            if any(member_counts[category] > data[category] for category in MEMBER_VALUES) or (
+                full_member_list
+                and any(member_counts[category] != data[category] for category in MEMBER_VALUES)
+            ):
+                error = "vote_members_mismatch"
     elif kind == "amount":
         if not any(abs(amount - data["amount_usd"]) <= 0.005 for amount in quoted_amounts(quote)):
             error = "amount_not_in_quote"

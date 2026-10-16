@@ -30,10 +30,11 @@ from minutes.llm.prices import cost_usd, estimate_usd
 from minutes.log import get_correlation_id, get_logger
 from minutes.tracing import llm_span
 
-_REQUEST_SLOTS = threading.Semaphore(2)
+_REQUEST_SLOTS = threading.Semaphore(8)
 _START_LOCK = threading.Lock()
 _USAGE_LOCK = threading.Lock()
 _LAST_START: float | None = None
+PROXY_TIMEOUT = httpx.Timeout(600.0, connect=10.0)
 _CORRECTION = "Your previous reply was not valid JSON for the schema. Reply with JSON only."
 PER_CALL_CEILINGS = {
     "extract": 0.08,
@@ -59,6 +60,25 @@ def _purpose_config(purpose: str) -> tuple[str | None, int, str, float | None]:
         raise ConfigError(f"unknown llm purpose {purpose}") from err
     model = models.strong if config.model == "strong" else models.cheap
     return model, config.max_tokens, config.reasoning_effort, PER_CALL_CEILINGS[purpose]
+
+
+def request_cache_key(
+    model: str,
+    messages: list[dict[str, str]],
+    max_tokens: int,
+    reasoning_effort: str,
+    schema: dict[str, object] | None,
+    schema_name: str,
+    sample_index: int,
+) -> str:
+    """Build the cache key for a resolved chat request."""
+    params: dict[str, object] = {
+        "max_completion_tokens": max_tokens,
+        "reasoning_effort": reasoning_effort,
+        "schema_name": schema_name,
+        "schema": schema,
+    }
+    return cache_key(model, messages, params, sample_index)
 
 
 def _record_call(
@@ -159,9 +179,7 @@ class ThinClient:
         self.cache = cache
         self.clock = clock
         self.wait = wait
-        self.http = (
-            http if http is not None else httpx.Client(timeout=httpx.Timeout(120.0, connect=10.0))
-        )
+        self.http = http if http is not None else httpx.Client(timeout=PROXY_TIMEOUT)
 
     def _key(
         self,
@@ -173,13 +191,15 @@ class ThinClient:
         schema_name: str,
         sample_index: int,
     ) -> str:
-        params: dict[str, object] = {
-            "max_completion_tokens": max_tokens,
-            "reasoning_effort": reasoning_effort,
-            "schema_name": schema_name,
-            "schema": schema,
-        }
-        return cache_key(model, messages, params, sample_index)
+        return request_cache_key(
+            model,
+            messages,
+            max_tokens,
+            reasoning_effort,
+            schema,
+            schema_name,
+            sample_index,
+        )
 
     def _body(
         self,
@@ -225,7 +245,7 @@ class ThinClient:
         with _START_LOCK:
             now = self.clock()
             if _LAST_START is not None:
-                delay = max(0.0, 3.0 - (now - _LAST_START))
+                delay = max(0.0, 1.0 - (now - _LAST_START))
                 if delay:
                     self.wait(delay)
             _LAST_START = self.clock()

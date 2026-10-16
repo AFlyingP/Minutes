@@ -288,14 +288,12 @@ def test_quota_fault_releases_job_and_exits_75(fresh_fixture_db: str) -> None:
     assert result.exit_code == 75
     assert "paused: quota exhausted, rerun the same command to resume" in result.output
     with db.connect(fresh_fixture_db) as conn:
-        row = conn.execute(
-            "SELECT status, attempts FROM jobs "
-            "WHERE stage = 'extract' AND document_id = 'alder-agenda-101'"
-        ).fetchone()
-        assert row is not None
-        status, attempts = row
-    assert status == "queued"
-    assert attempts == 0
+        # Documents run in parallel, so which one meets the quota error depends on timing.
+        rows = conn.execute(
+            "SELECT status, attempts FROM jobs WHERE stage = 'extract' AND status <> 'done'"
+        ).fetchall()
+    assert rows
+    assert all(row == ("queued", 0) for row in rows)
 
     resumed = _run_ingest(fresh_fixture_db, "extract")
     assert resumed.exit_code == 0, resumed.output

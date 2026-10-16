@@ -2,7 +2,9 @@ import json
 import logging
 import os
 import random
+import threading
 from collections.abc import Iterator
+from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -20,7 +22,7 @@ from minutes.errors import (
 )
 from minutes.llm import Budget
 from minutes.llm.cache import DiskCache, ReplayStore, cache_key
-from minutes.llm.client import ThinClient
+from minutes.llm.client import PROXY_TIMEOUT, ThinClient
 from minutes.llm.client import _record_call as record_call
 from minutes.llm.prices import cost_usd
 from minutes.log import JsonFormatter
@@ -76,7 +78,7 @@ def make_client(
 ) -> ThinClient:
     http = httpx.Client(
         transport=handler,
-        timeout=httpx.Timeout(120.0, connect=10.0),
+        timeout=PROXY_TIMEOUT,
     )
     return ThinClient(
         http=http,
@@ -91,6 +93,15 @@ def success(content: str = "ok", *, usage: dict[str, int] | None = None) -> http
     if usage is not None:
         body["usage"] = usage
     return httpx.Response(200, json=body)
+
+
+def test_default_http_timeout_has_600_second_read_and_10_second_connect() -> None:
+    client = ThinClient()
+    try:
+        assert client.http.timeout.read == 600.0
+        assert client.http.timeout.connect == 10.0
+    finally:
+        client.http.close()
 
 
 def test_request_body_matches_spec(tmp_path: Path) -> None:
@@ -351,7 +362,7 @@ def test_daily_cap_raises_quota_error_before_sending(
     assert requests == 0
 
 
-def test_rate_limit_spaces_request_starts_by_3_seconds(tmp_path: Path) -> None:
+def test_rate_limit_spaces_request_starts_by_1_second(tmp_path: Path) -> None:
     clock = FakeClock()
     starts: list[float] = []
 
@@ -363,8 +374,134 @@ def test_rate_limit_spaces_request_starts_by_3_seconds(tmp_path: Path) -> None:
     client.chat(purpose="synth", messages=[{"role": "user", "content": "one"}])
     clock.now += 0.75
     client.chat(purpose="synth", messages=[{"role": "user", "content": "two"}])
-    assert clock.waits == [2.25]
-    assert starts[1] - starts[0] == 3.0
+    assert clock.waits == [0.25]
+    assert starts[1] - starts[0] == 1.0
+
+
+def test_ninth_concurrent_request_waits_for_a_request_slot(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(ThinClient, "_reserve_request", lambda self: None)
+    active = 0
+    started = 0
+    lock = threading.Lock()
+    eight_active = threading.Event()
+    all_issued = threading.Event()
+    release = threading.Event()
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal active, started
+        with lock:
+            active += 1
+            started += 1
+            if active == 8:
+                eight_active.set()
+        if not release.wait(5):
+            raise RuntimeError("request handler timed out")
+        with lock:
+            active -= 1
+        return success()
+
+    client = make_client(httpx.MockTransport(handler), tmp_path, FakeClock())
+    issued = 0
+
+    def call(index: int) -> None:
+        nonlocal issued
+        with lock:
+            issued += 1
+            if issued == 9:
+                all_issued.set()
+        client.chat(purpose="synth", messages=[{"role": "user", "content": str(index)}])
+
+    with ThreadPoolExecutor(max_workers=9) as pool:
+        futures = [pool.submit(call, index) for index in range(9)]
+        try:
+            assert all_issued.wait(5)
+            assert eight_active.wait(5)
+            with lock:
+                assert started == 8
+                assert active == 8
+        finally:
+            release.set()
+        for future in futures:
+            future.result(timeout=5)
+    with lock:
+        assert started == 9
+        assert active == 0
+    usage = json.loads((tmp_path / "data" / "cache" / "llm_usage.json").read_text())
+    assert usage["requests"] == 9
+
+
+@pytest.mark.parametrize("separate_clients", [False, True])
+def test_concurrent_calls_keep_usage_cache_and_call_rows_correct(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    separate_clients: bool,
+) -> None:
+    from minutes.llm import client as client_module
+
+    monkeypatch.setattr(ThinClient, "_reserve_request", lambda self: None)
+    request_count = 0
+    requests_lock = threading.Lock()
+    call_rows: list[tuple[object, ...]] = []
+    rows_lock = threading.Lock()
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal request_count
+        with requests_lock:
+            request_count += 1
+        return success('{"answer":5}', usage={"prompt_tokens": 4, "completion_tokens": 3})
+
+    class FakeConnection:
+        def __enter__(self) -> "FakeConnection":
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            return None
+
+        def execute(self, query: str, params: tuple[object, ...]) -> None:
+            assert "INSERT INTO llm_calls" in query
+            with rows_lock:
+                call_rows.append(params)
+
+    monkeypatch.setattr(client_module, "_record_call", record_call)
+    monkeypatch.setattr(psycopg, "connect", lambda *args, **kwargs: FakeConnection())
+    root = tmp_path / "cache"
+    clients = (
+        [make_client(httpx.MockTransport(handler), tmp_path, FakeClock(), cache=DiskCache(root))]
+        if not separate_clients
+        else [
+            make_client(httpx.MockTransport(handler), tmp_path, FakeClock(), cache=DiskCache(root))
+            for _ in range(8)
+        ]
+    )
+
+    def call(index: int) -> str:
+        client = clients[0] if len(clients) == 1 else clients[index]
+        result = client.chat(
+            purpose="synth",
+            messages=[{"role": "user", "content": f"request {index}"}],
+            schema=SCHEMA,
+            schema_name="answer",
+        )
+        assert result.parsed == {"answer": 5}
+        return result.text
+
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        results = list(pool.map(call, range(8)))
+    assert results == ['{"answer":5}'] * 8
+    assert request_count == 8
+    assert len(call_rows) == 8
+    assert all(row[1] == "synth" and row[4] is False for row in call_rows)
+    assert len({row[3] for row in call_rows}) == 8
+    usage = json.loads((tmp_path / "data" / "cache" / "llm_usage.json").read_text())
+    assert usage["requests"] == 8
+    cache_files = list(root.rglob("*.json"))
+    assert len(cache_files) == 8
+    for path in cache_files:
+        entry = DiskCache(root).get(path.stem)
+        assert entry is not None
+        assert entry["text"] == '{"answer":5}'
 
 
 def test_replay_miss_raises(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

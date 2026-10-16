@@ -17,16 +17,18 @@ from psycopg import sql
 from psycopg.rows import TupleRow
 
 from minutes import db
-from minutes.config import CONFIG_DIR, ROOT, get_settings
+from minutes.config import CONFIG_DIR, ROOT, get_settings, load_models
 from minutes.errors import ConfigError, GateStaleError, LLMReplayMiss
 from minutes.evals import runner
 from minutes.ingest import pipeline
 from minutes.labels.schema import parse_payload
+from minutes.llm import Budget, ChatResult, LLMClient
 from minutes.llm.cache import DiskCache, recording_signature
+from minutes.llm.client import request_cache_key
 from minutes.models import Embedder, Reranker
 
 SNAPSHOT_TABLES = ("cities", "meetings", "documents", "units")
-GATE_STAGES: tuple[str, ...] = ("segment", "chunk", "embed")
+GATE_STAGES: tuple[str, ...] = ("segment", "chunk", "embed", "extract")
 REPLAY_DIR = ROOT / "eval" / "gate"
 GATED: dict[str, tuple[str, str, float]] = {
     "recall_at_10": ("retrieval.item.hybrid_rerank.recall_at_10", "lower", 0.02),
@@ -405,15 +407,71 @@ class RecordingCache(DiskCache):
         self.recorder.llm[key] = value
 
 
+class RecordingStubClient:
+    def __init__(self, client: LLMClient, recorder: Recorder) -> None:
+        self.client = client
+        self.recorder = recorder
+
+    def chat(
+        self,
+        *,
+        purpose: str,
+        messages: list[dict[str, str]],
+        schema: dict[str, object] | None = None,
+        schema_name: str = "output",
+        model: str | None = None,
+        sample_index: int = 0,
+        budget: Budget | None = None,
+    ) -> ChatResult:
+        result = self.client.chat(
+            purpose=purpose,
+            messages=messages,
+            schema=schema,
+            schema_name=schema_name,
+            model=model,
+            sample_index=sample_index,
+            budget=budget,
+        )
+        purpose_config = load_models().purposes[purpose]
+        self.recorder.llm[
+            request_cache_key(
+                result.model,
+                messages,
+                purpose_config.max_tokens,
+                purpose_config.reasoning_effort,
+                schema,
+                schema_name,
+                sample_index,
+            )
+        ] = {
+            "text": result.text,
+            "model": result.model,
+            "prompt_tokens": result.prompt_tokens,
+            "completion_tokens": result.completion_tokens,
+            "latency_ms": result.latency_ms,
+        }
+        return result
+
+
 @contextmanager
 def _recording(recorder: Recorder) -> Iterator[None]:
     from minutes import llm, models
 
+    previous_get_client = llm.get_client
+
+    def recording_get_client() -> LLMClient:
+        client = previous_get_client()
+        if get_settings().llm_mode == "stub":
+            return RecordingStubClient(client, recorder)
+        return client
+
     models.recorder = recorder
     llm.cache_recorder = lambda root: RecordingCache(root, recorder)
+    llm.get_client = recording_get_client
     try:
         yield
     finally:
+        llm.get_client = previous_get_client
         models.recorder = None
         llm.cache_recorder = None
 

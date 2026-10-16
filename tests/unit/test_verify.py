@@ -38,6 +38,7 @@ def test_vote_members_must_match_counts() -> None:
     quote = "Ayes: Gray, Hale, Ivers, Jones"
     data = vote(quote, 4) | {
         "members": [{"name": name, "value": "aye"} for name in ("Gray", "Hale", "Ivers")]
+        + [{"name": "Jones", "value": "no"}]
     }
     assert verify("vote", data, quote).error == "vote_members_mismatch"
     data["ayes"] = 3
@@ -59,6 +60,29 @@ def test_amount_must_appear_in_quote() -> None:
         == "amount_not_in_quote"
     )
     assert quoted_amounts("$2 billion and $3 thousand") == [2e9, 3000.0]
+
+
+def test_amount_suffixes_match_values() -> None:
+    for quote, amount in (
+        ("The $14k increase is within the police departments budget.", 14000),
+        ("The project costs $3M.", 3_000_000),
+        ("The project costs $1B.", 1_000_000_000),
+        ("The project costs $2bn.", 2_000_000_000),
+        ("The project costs $1.5 million.", 1_500_000),
+    ):
+        assert verify("amount", {"quote": quote, "amount_usd": amount}, quote).ok
+
+
+def test_amount_suffix_requires_word_boundary() -> None:
+    quote = "The $5 milestones are listed in the budget."
+    assert quoted_amounts(quote) == [5.0]
+    assert verify("amount", {"quote": quote, "amount_usd": 5}, quote).ok
+    assert (
+        verify(
+            "amount", {"quote": "The $14k increase.", "amount_usd": 14}, "The $14k increase."
+        ).error
+        == "amount_not_in_quote"
+    )
 
 
 def test_ordinance_identifier_must_appear_in_quote() -> None:
@@ -101,3 +125,73 @@ def test_unknown_kind_raises_value_error() -> None:
 def test_vote_counts_add_labels_and_table_rows() -> None:
     quote = "Ayes: 2 \u2013 Gray, Hale\nNoes: None\nIvers | yes\nJones | Nay\nKing | Excused"
     assert quoted_counts(quote) == {"ayes": 3, "noes": 1, "abstain": 0, "absent": 1}
+
+
+def test_vote_counts_from_case_insensitive_labels() -> None:
+    quote = "In favor: 1 - Moore Opposed: 5 - Hollingsworth, Kettle, Nelson, Strauss, Woo"
+    assert verify("vote", vote(quote, 1, 5), quote).ok
+
+
+def test_vote_tally_overrides_roll_call_members() -> None:
+    quote = (
+        "Approved by the following roll call vote: E.Johnson \u2013 Aye, J.Johnson \u2013 Aye, "
+        "Herzog \u2013 Aye, Jackson - Aye, "
+        "Hutchinson \u2013 Aye, Manning \u2013 Aye and Gilbert \u2013 Aye (7-0-0-0)"
+    )
+    members = [
+        {"name": name, "value": "aye"}
+        for name in (
+            "E.Johnson",
+            "J.Johnson",
+            "Herzog",
+            "Jackson",
+            "Hutchinson",
+            "Manning",
+            "Gilbert",
+        )
+    ]
+    assert quoted_counts(quote) == {"ayes": 7, "noes": 0, "abstain": 0, "absent": 0}
+    assert verify("vote", vote(quote, 7) | {"members": members}, quote).ok
+
+
+def test_vote_counts_from_dash_roll_call() -> None:
+    quote = (
+        "By the following Vote (Approved): Joiner- Aye, Andreatta -Aye, Brown \u2013 Aye, "
+        "Lauritsen \u2013 Aye and Mayor Karleskint- Aye."
+    )
+    assert quoted_counts(quote) == {"ayes": 5, "noes": 0, "abstain": 0, "absent": 0}
+    assert verify("vote", vote(quote, 5), quote).ok
+
+
+def test_vote_tally_allows_partial_abstainer_members() -> None:
+    quote = (
+        "Commissioners, Herzog, J.Johnson and Manning abstained. Unanimously Approved "
+        "with no opposition (4-0-3-0)."
+    )
+    members = [{"name": name, "value": "abstain"} for name in ("Herzog", "J.Johnson", "Manning")]
+    assert verify("vote", vote(quote, 4) | {"abstain": 3, "members": members}, quote).ok
+    assert (
+        verify("vote", vote(quote, 5) | {"abstain": 3, "members": members}, quote).error
+        == "vote_count_mismatch"
+    )
+
+
+def test_vote_members_reject_counts_above_or_different_from_full_list() -> None:
+    quote = "Approved by roll call: Gray - Aye (7-0-0-0)"
+    eight_ayes = [{"name": str(index), "value": "aye"} for index in range(8)]
+    assert verify("vote", vote(quote, 7) | {"members": eight_ayes}, quote).error == (
+        "vote_members_mismatch"
+    )
+
+    seven_members = [{"name": str(index), "value": "aye"} for index in range(6)] + [
+        {"name": "6", "value": "no"}
+    ]
+    assert verify("vote", vote(quote, 7) | {"members": seven_members}, quote).error == (
+        "vote_members_mismatch"
+    )
+
+
+def test_hyphenated_words_do_not_count_as_dash_votes() -> None:
+    quote = "e-Notice was sent to Smith-Noble. Ayes: Gray, Hale"
+    assert quoted_counts(quote) == {"ayes": 2, "noes": 0, "abstain": 0, "absent": 0}
+    assert verify("vote", vote(quote, 2), quote).ok

@@ -41,6 +41,7 @@ def test_runner_writes_file_with_required_keys(eval_file: EvalFile) -> None:
         "labels",
         "retrieval",
         "segmentation",
+        "extraction",
     } <= eval_file.results.keys()
     segmentation = cast(dict[str, object], eval_file.results["segmentation"])
     assert "per_city" in segmentation
@@ -113,13 +114,13 @@ def test_two_runs_differ_only_in_timestamp_and_commit(tmp_path: Path, fixture_co
 
 
 def test_unknown_section_is_rejected(tmp_path: Path, fixture_corpus: str) -> None:
-    with pytest.raises(ValidationError, match=r"^unknown section extraction$"):
+    with pytest.raises(ValidationError, match=r"^unknown section unknown$"):
         run_suite(
             suite="full",
             controls=True,
             labels_dir=LABELS_DIR,
             out_path=tmp_path / "unknown.json",
-            only={"extraction"},
+            only={"unknown"},
         )
 
 
