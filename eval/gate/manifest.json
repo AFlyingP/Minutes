@@ -2,21 +2,22 @@
   "counts": {
     "documents": 90,
     "embeddings": 4542,
-    "llm": 0,
+    "llm": 329,
     "rerank": 2280,
     "units": 2337
   },
   "files": {
     "embeddings.npz": "1b84c20bc6065efb743391db8686fe08dd0b6a499647994189e6459e7e6fbd66",
-    "llm.jsonl.gz": "7c5082d4337a849ba470c859aa261c7cd94f028f281b231926cf85faaabf9987",
+    "llm.jsonl.gz": "f48d9ba1085b6ca9451006b346db1ee0ee4c511a23db032eec156e6b7370804d",
     "rerank.jsonl.gz": "ccf0442597d8c0671bbefca89b083e7b59913fd8bf05ebd949c3bb0da5b47289",
     "snapshot.jsonl.gz": "8e1ec205eebe5de24764e855de466b6a0cc3f43c7bd7aab3b3f1a18652e76708"
   },
-  "git_commit": "db07299936f3aca6c9df1c5c8dde98659f1192c9",
-  "recorded_utc": "2026-10-15T20:55:24Z",
+  "git_commit": "4001e71534a06b512e24bdc30b6ac89da8aee456",
+  "recorded_utc": "2026-10-16T22:39:20Z",
   "stage_versions": {
     "chunk": 2,
     "embed": 1,
+    "extract": 2,
     "segment": 2
   }
 }

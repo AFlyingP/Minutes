@@ -12,7 +12,7 @@
 | recall@10 fixed-size chunks, vector | 0.4167 | n/a | full |
 | agenda segmentation exact count | 1 | n/a | full |
 | agenda segmentation mean absolute error | 0 | n/a | full |
-| extraction accuracy | n/a | n/a | full |
+| extraction accuracy | 0.8364 | 5 (0.8273 / 0.8364 / 0.8455) | full |
 | answer accuracy baseline | 0.4375 | 5 (0.4375 / 0.4375 / 0.4375) | full |
 | answer accuracy final | n/a | n/a | full |
 | answer accuracy LangGraph | n/a | n/a | full |

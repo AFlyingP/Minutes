@@ -53,8 +53,63 @@
     },
     "segments": 31695
   },
-  "generated_utc": "2026-10-15T20:37:38Z",
-  "git_commit": "db07299936f3aca6c9df1c5c8dde98659f1192c9",
+  "extraction": {
+    "overall": {
+      "max": 0.8455,
+      "median": 0.8364,
+      "min": 0.8273,
+      "runs": 5
+    },
+    "per_city": {
+      "lincoln": {
+        "max": 0.8909,
+        "median": 0.8727,
+        "min": 0.8636,
+        "runs": 5
+      },
+      "seattle": {
+        "max": 0.8091,
+        "median": 0.8,
+        "min": 0.7818,
+        "runs": 5
+      }
+    },
+    "per_kind": {
+      "amount": {
+        "max": 0.85,
+        "median": 0.825,
+        "min": 0.75,
+        "runs": 5
+      },
+      "motion": {
+        "max": 1.0,
+        "median": 0.975,
+        "min": 0.95,
+        "runs": 5
+      },
+      "ordinance": {
+        "max": 0.875,
+        "median": 0.825,
+        "min": 0.775,
+        "runs": 5
+      },
+      "statement": {
+        "max": 0.75,
+        "median": 0.725,
+        "min": 0.7,
+        "runs": 5
+      },
+      "vote": {
+        "max": 0.8833,
+        "median": 0.85,
+        "min": 0.8,
+        "runs": 5
+      }
+    },
+    "verifier_reject_rate": 0.0672
+  },
+  "generated_utc": "2026-10-16T22:36:37Z",
+  "git_commit": "4001e71534a06b512e24bdc30b6ac89da8aee456",
   "grader": {
     "answer": {
       "accuracy": 1.0,
