@@ -1,3 +1,4 @@
+import contextlib
 import time
 
 import pytest
@@ -79,10 +80,11 @@ def test_more_than_200_rows_is_rejected() -> None:
 
 
 def test_set_role_and_set_timeout_do_not_persist() -> None:
-    sql_tool("SET statement_timeout = 0")
-    started = time.monotonic()
-    _assert_tool_error("SELECT pg_sleep(4)", "timeout")
-    assert time.monotonic() - started < 5
+    for statement in ("SET statement_timeout = 0", "SET ROLE minutes"):
+        with contextlib.suppress(ToolError):
+            sql_tool(statement)
+    rows = sql_tool("SELECT current_setting('statement_timeout'), current_user")["rows"]
+    assert rows == [["3s", "minutes_ro"]]
 
 
 @pytest.mark.parametrize(
