@@ -105,6 +105,22 @@ export interface FactsResponse {
   rows: FactRow[];
 }
 
+export interface AgentResponse {
+  status: "completed" | "limit_exceeded" | "error";
+  answer: string;
+  citations: { document_id: string; unit_index: number; label: string }[];
+  steps: {
+    index: number;
+    tool: string;
+    arguments: Record<string, unknown>;
+    result_summary: string;
+    error: string | null;
+  }[];
+  cost_usd: number;
+  limit: "steps" | "cost" | "time" | null;
+  max_steps: 8;
+}
+
 export type DocKind = "agenda" | "minutes" | "transcript";
 export type Box = [number, number, number, number, number, number];
 

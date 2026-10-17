@@ -2,7 +2,8 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { createBrowserRouter, RouterProvider } from "react-router-dom";
 
-import App, { Placeholder } from "./App";
+import App from "./App";
+import AgentPage from "./pages/AgentPage";
 import DocPage from "./pages/DocPage";
 import FactsPage from "./pages/FactsPage";
 import LabelPage from "./pages/LabelPage";
@@ -18,7 +19,7 @@ const router = createBrowserRouter([
       { index: true, element: <SearchPage /> },
       { path: "facts", element: <FactsPage /> },
       { path: "ask", element: <AskPage /> },
-      { path: "agent", element: <Placeholder /> },
+      { path: "agent", element: <AgentPage /> },
       { path: "label", element: <LabelPage /> },
       { path: "doc/:id", element: <DocPage /> },
     ],

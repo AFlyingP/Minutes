@@ -1,6 +1,7 @@
 import type {
   City,
   AskResponse,
+  AgentResponse,
   DocumentDetail,
   DocumentsResponse,
   FactsResponse,
@@ -98,6 +99,10 @@ export function ask(question: string, filters: Params): Promise<AskResponse> {
 
 export function fetchFacts(kind: string, params: Params = {}): Promise<FactsResponse> {
   return getJson<FactsResponse>(`/api/facts/${encodeURIComponent(kind)}`, params);
+}
+
+export function runAgent(question: string): Promise<AgentResponse> {
+  return postJson<AgentResponse>("/api/agent", { question });
 }
 
 export function fetchDocuments(params: Params = {}): Promise<DocumentsResponse> {

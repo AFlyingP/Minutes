@@ -8,10 +8,6 @@ const LINKS = [
   { to: "/label", id: "nav-label", text: "Label" },
 ];
 
-export function Placeholder() {
-  return <p data-testid="placeholder">Not built yet.</p>;
-}
-
 export default function App() {
   return (
     <>
