@@ -75,8 +75,11 @@ class EvalContext:
         conn: Connection,
         labels: Labels,
         controls: bool,
+        previous: dict[str, object] | None = None,
     ) -> None:
         self.suite = suite
+        # results already in the output file; a stored baseline answer run is kept (not re-run)
+        self.previous = previous or {}
         self.corpus = corpus_name
         self.conn = conn
         self.labels = labels
@@ -447,7 +450,7 @@ def _extraction(context: EvalContext) -> Result:
 
 
 def _answers(context: EvalContext) -> Result:
-    if context.suite != "full":
+    if context.suite not in ("full", "gate"):
         return {}
     questions = _question_labels(context.labels)
     answerable = [
@@ -458,8 +461,14 @@ def _answers(context: EvalContext) -> Result:
         for label, payload in questions
         if isinstance(payload, QuestionUnanswerable)
     ]
-    pipeline_results: Result = {}
-    for pipeline_name in ("baseline",):
+    stored = cast(dict[str, object], context.previous.get("answers") or {}).get("baseline")
+    pipeline_results: Result = {"baseline": stored} if context.suite == "full" and stored else {}
+    pipelines: tuple[Literal["baseline", "final"], ...] = (
+        ("final",)
+        if context.suite == "gate" or "baseline" in pipeline_results
+        else ("baseline", "final")
+    )
+    for pipeline_name in pipelines:
         answer_accuracy: list[float | None] = []
         decline_accuracy: list[float | None] = []
         false_decline_rate: list[float | None] = []
@@ -573,9 +582,11 @@ def run_suite(
     only: set[str] | None = None,
 ) -> dict[str, object]:
     """Run registered evaluation sections and merge their results into a JSON file."""
-    available = {"retrieval", "segmentation", "extraction"} if suite == "gate" else set(SECTIONS)
+    available = (
+        {"retrieval", "segmentation", "extraction", "answers"} if suite == "gate" else set(SECTIONS)
+    )
     if only is None and suite == "gate":
-        names = ["retrieval", "segmentation", "extraction"]
+        names = ["retrieval", "segmentation", "extraction", "answers"]
     elif only is None:
         names = list(SECTIONS)
     else:
@@ -590,7 +601,12 @@ def run_suite(
         raise ConfigError("label files are not frozen")
     labels = load_labels(labels_dir)
     with db.connect(corpus_database_url(settings.corpus)) as conn:
-        context = EvalContext(suite, settings.corpus, conn, labels, controls)
+        previous = (
+            cast(dict[str, object], json.loads(out_path.read_text(encoding="utf-8")))
+            if out_path.exists()
+            else {}
+        )
+        context = EvalContext(suite, settings.corpus, conn, labels, controls, previous)
         results: dict[str, object] = {
             "suite": suite,
             "generated_utc": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),

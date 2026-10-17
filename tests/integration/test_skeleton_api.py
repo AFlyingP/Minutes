@@ -132,9 +132,9 @@ def test_ask_declines_when_nothing_is_retrieved(client: TestClient) -> None:
 
 
 def test_ask_rejects_a_pipeline_that_is_not_built_yet(client: TestClient) -> None:
-    response = client.post("/api/ask", json={"question": "sidewalk", "pipeline": "final"})
+    response = client.post("/api/ask", json={"question": "sidewalk", "pipeline": "langgraph"})
     assert response.status_code == 422
-    assert response.json()["detail"] == "pipeline final is not available"
+    assert response.json()["detail"] == "pipeline langgraph is not available"
 
 
 def test_search_and_ask_commands_print_hits_and_citations(fixture_corpus: str) -> None:

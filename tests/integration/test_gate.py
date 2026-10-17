@@ -18,7 +18,6 @@ from minutes.cli import app
 from minutes.config import get_settings
 from minutes.errors import ConfigError, GateStaleError
 from minutes.evals import gate, runner
-from minutes.ingest import pipeline, segment
 
 pytestmark = pytest.mark.integration
 FIXTURE_LABELS = Path("tests/fixtures/labels")
@@ -230,12 +229,15 @@ def test_regression_makes_gate_fail(
     baseline = tmp_path / "baseline.json"
     baseline.write_text(json.dumps({"metrics": {"segmentation_exact_rate": 1.0}}), encoding="utf-8")
 
-    def regress_segment(conn: pipeline.Connection, document_id: str) -> dict[str, object]:
-        result = segment.run(conn, document_id)
-        conn.execute("UPDATE items SET kind = 'section' WHERE document_id = %s", (document_id,))
-        return result
+    # regressed at evaluation time: changing items at the segment stage would also change
+    # the item links that answer prompts depend on, and the recording would be stale
+    original = runner.SECTIONS["segmentation"]
 
-    monkeypatch.setitem(pipeline.STAGE_FUNCTIONS, "segment", regress_segment)
+    def regress_segmentation(context: runner.EvalContext) -> runner.Result:
+        context.conn.execute("UPDATE items SET kind = 'section'")
+        return original(context)
+
+    monkeypatch.setitem(runner.SECTIONS, "segmentation", regress_segmentation)
     from minutes import cli
 
     monkeypatch.setattr(cli, "GATE_RECORDING_DIR", gate_files.recording)

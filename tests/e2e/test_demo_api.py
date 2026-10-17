@@ -56,3 +56,38 @@ def test_demo_step_5_facts(fixture_corpus: str) -> None:
     )
     assert vote["data"]["ayes"] == 4
     assert vote["label"] == "p. 2"
+
+
+def test_demo_step_6_ask(fixture_corpus: str) -> None:
+    client = TestClient(create_app())
+    response = client.post(
+        "/api/ask",
+        json={
+            "question": "How did the council vote on the Granite Works contract in "
+            "Resolution 2024-07?",
+            "city": "birch",
+        },
+    )
+
+    assert response.status_code == 200
+    answer = response.json()
+    assert answer["declined"] is False
+    assert answer["sentences"] == [
+        {"text": "The roll call vote was 4 ayes and 1 noes.", "citations": [1]}
+    ]
+    assert answer["citations"][0]["document_id"] == "birch-minutes-201"
+    assert answer["citations"][0]["unit_index"] == 2
+
+
+def test_demo_step_7_decline(fixture_corpus: str) -> None:
+    client = TestClient(create_app())
+    response = client.post(
+        "/api/ask", json={"question": "What was decided about the airport runway extension?"}
+    )
+
+    assert response.status_code == 200
+    answer = response.json()
+    assert answer["declined"] is True
+    assert answer["decline_reason"] == "no_retrieval"
+    assert answer["decline_message"] == "I can't answer that from the indexed records."
+    assert answer["sentences"] == []

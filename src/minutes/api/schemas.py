@@ -77,7 +77,7 @@ class AskIn(BaseModel):
     date_from: date | None = None
     date_to: date | None = None
     kind: DocKind | None = None
-    pipeline: Pipeline = "baseline"
+    pipeline: Pipeline = "final"
 
 
 class SentenceOut(BaseModel):
