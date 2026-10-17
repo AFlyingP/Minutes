@@ -80,6 +80,31 @@ export interface AskResponse {
   dropped_sentences: number;
 }
 
+export type FactCollection = "votes" | "motions" | "ordinances" | "amounts" | "statements";
+
+export interface FactRow {
+  id: number;
+  document_id: string;
+  meeting_id: string;
+  city_id: string;
+  body: string;
+  meeting_date: string;
+  doc_kind: DocKind;
+  unit_index: number;
+  unit_kind: "page" | "segment";
+  quote_start: number | null;
+  quote_end: number | null;
+  quote: string;
+  label: string;
+  data: Record<string, string | number | null | object>;
+}
+
+export interface FactsResponse {
+  kind: FactCollection;
+  total: number;
+  rows: FactRow[];
+}
+
 export type DocKind = "agenda" | "minutes" | "transcript";
 export type Box = [number, number, number, number, number, number];
 

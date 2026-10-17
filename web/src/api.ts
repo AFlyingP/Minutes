@@ -3,6 +3,7 @@ import type {
   AskResponse,
   DocumentDetail,
   DocumentsResponse,
+  FactsResponse,
   Label,
   LabelExportResponse,
   LabelIn,
@@ -93,6 +94,10 @@ export function ask(question: string, filters: Params): Promise<AskResponse> {
     if (value) body[key] = value;
   }
   return postJson<AskResponse>("/api/ask", body);
+}
+
+export function fetchFacts(kind: string, params: Params = {}): Promise<FactsResponse> {
+  return getJson<FactsResponse>(`/api/facts/${encodeURIComponent(kind)}`, params);
 }
 
 export function fetchDocuments(params: Params = {}): Promise<DocumentsResponse> {

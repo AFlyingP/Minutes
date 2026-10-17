@@ -113,6 +113,42 @@ button {
   margin-right: 0.75rem;
 }
 
+.facts-controls {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.facts-controls .filters {
+  margin-top: 0;
+}
+
+.facts-table-wrap {
+  overflow-x: auto;
+  margin-top: 1rem;
+}
+
+.facts-table-wrap table {
+  width: 100%;
+  border-collapse: collapse;
+  text-align: left;
+}
+
+.facts-table-wrap th,
+.facts-table-wrap td {
+  padding: 0.5rem;
+  border-bottom: 1px solid var(--line);
+  vertical-align: top;
+}
+
+.facts-pager {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 0.75rem;
+}
+
 .unit-viewer {
   align-items: start;
 }

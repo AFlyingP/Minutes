@@ -4,6 +4,7 @@ import { createBrowserRouter, RouterProvider } from "react-router-dom";
 
 import App, { Placeholder } from "./App";
 import DocPage from "./pages/DocPage";
+import FactsPage from "./pages/FactsPage";
 import LabelPage from "./pages/LabelPage";
 import AskPage from "./pages/AskPage";
 import SearchPage from "./pages/SearchPage";
@@ -15,7 +16,7 @@ const router = createBrowserRouter([
     element: <App />,
     children: [
       { index: true, element: <SearchPage /> },
-      { path: "facts", element: <Placeholder /> },
+      { path: "facts", element: <FactsPage /> },
       { path: "ask", element: <AskPage /> },
       { path: "agent", element: <Placeholder /> },
       { path: "label", element: <LabelPage /> },
