@@ -56,8 +56,38 @@
         "runs": 5
       },
       "latency_ms": {
-        "p50": 4282.0,
-        "p95": 6745.0
+        "p50": 4390.0,
+        "p95": 6911.0
+      }
+    },
+    "langgraph": {
+      "answer_accuracy": {
+        "max": 0.7917,
+        "median": 0.7708,
+        "min": 0.7708,
+        "runs": 5
+      },
+      "decline_accuracy": {
+        "max": 1.0,
+        "median": 1.0,
+        "min": 1.0,
+        "runs": 5
+      },
+      "faithfulness": {
+        "max": 1.0,
+        "median": 0.9762,
+        "min": 0.9756,
+        "runs": 5
+      },
+      "false_decline_rate": {
+        "max": 0.1875,
+        "median": 0.1458,
+        "min": 0.125,
+        "runs": 5
+      },
+      "latency_ms": {
+        "p50": 4207.0,
+        "p95": 6038.0
       }
     }
   },
@@ -149,8 +179,8 @@
     },
     "verifier_reject_rate": 0.0672
   },
-  "generated_utc": "2026-10-17T04:37:13Z",
-  "git_commit": "d1994776c1eed8976c95ce00d32a78bb5a7dffaf",
+  "generated_utc": "2026-10-17T09:47:24Z",
+  "git_commit": "65077805c5461926751c3f6c3433a5096670bcc5",
   "grader": {
     "answer": {
       "accuracy": 1.0,

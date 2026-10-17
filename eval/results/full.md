@@ -15,7 +15,7 @@
 | extraction accuracy | 0.8364 | 5 (0.8273 / 0.8364 / 0.8455) | full |
 | answer accuracy baseline | 0.4375 | 5 (0.4375 / 0.4375 / 0.4375) | full |
 | answer accuracy final | 0.7708 | 5 (0.7708 / 0.7708 / 0.7917) | full |
-| answer accuracy LangGraph | n/a | n/a | full |
+| answer accuracy LangGraph | 0.7708 | 5 (0.7708 / 0.7708 / 0.7917) | full |
 | faithfulness baseline | 0.9286 | 5 (0.9286 / 0.9286 / 0.9643) | full |
 | faithfulness final | 0.9762 | 5 (0.9756 / 0.9762 / 1) | full |
 | decline accuracy final | 1 | 5 (1 / 1 / 1) | full |
@@ -23,8 +23,8 @@
 | cost per query, controls off | 0.000471 | n/a | full |
 | cost per query, controls on | 0.000292 | n/a | full |
 | cost reduction | 0.380042 | n/a | full |
-| answer latency p50 | 4282 | n/a | full |
-| answer latency p95 | 6745 | n/a | full |
+| answer latency p50 | 4390 | n/a | full |
+| answer latency p95 | 6911 | n/a | full |
 | parse quality lincoln | 0.9309 | n/a | lincoln |
 | parse quality seattle | 0.978 | n/a | seattle |
 | pgvector ANN recall@10 | n/a | n/a | full |
