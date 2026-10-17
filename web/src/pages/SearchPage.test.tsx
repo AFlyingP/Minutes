@@ -111,6 +111,54 @@ test("submits the query with filters and renders hits", async () => {
   expect(span).toHaveAttribute("href", "/doc/birch-minutes-201?unit=1&start=301&end=468");
 });
 
+test("body options follow the selected city", async () => {
+  mockFetch(() => Promise.resolve(json({ hits: [] })));
+  renderPage();
+  await screen.findByRole("option", { name: "Birch" });
+  fireEvent.change(screen.getByTestId("filter-city"), { target: { value: "alder" } });
+  expect(screen.getByTestId("filter-body").querySelectorAll("option")).toHaveLength(2);
+  expect(screen.getByTestId("filter-body")).toHaveTextContent("City Council");
+  expect(screen.getByTestId("filter-body")).not.toHaveTextContent("Planning Commission");
+});
+
+test("changing city clears a body the city does not have", async () => {
+  mockFetch(() => Promise.resolve(json({ hits: [] })));
+  renderPage();
+  await screen.findByRole("option", { name: "Birch" });
+  fireEvent.change(screen.getByTestId("filter-city"), { target: { value: "birch" } });
+  fireEvent.change(screen.getByTestId("filter-body"), { target: { value: "Planning Commission" } });
+  fireEvent.change(screen.getByTestId("filter-city"), { target: { value: "alder" } });
+  expect(screen.getByTestId("filter-body")).toHaveValue("");
+});
+
+test("restores query and filters from the URL", async () => {
+  const fetchMock = mockFetch(() => Promise.resolve(json({ hits: [] })));
+  renderPage(
+    "/?q=sidewalk+repair&city=birch&body=City+Council&date_from=2024-03-01&date_to=2024-04-01&kind=minutes",
+  );
+  await screen.findByRole("option", { name: "Birch" });
+  expect(screen.getByTestId("search-input")).toHaveValue("sidewalk repair");
+  expect(screen.getByTestId("filter-city")).toHaveValue("birch");
+  expect(screen.getByTestId("filter-body")).toHaveValue("City Council");
+  expect(screen.getByTestId("filter-date-from")).toHaveValue("2024-03-01");
+  expect(screen.getByTestId("filter-date-to")).toHaveValue("2024-04-01");
+  expect(screen.getByTestId("filter-kind")).toHaveValue("minutes");
+  await screen.findByTestId("empty");
+  const request = new URL(fetchMock.mock.calls[1][0], "http://localhost");
+  expect(request.searchParams.get("city")).toBe("birch");
+  expect(request.searchParams.get("date_from")).toBe("2024-03-01");
+});
+
+test("sends no mode or chunker parameter", async () => {
+  const fetchMock = mockFetch(() => Promise.resolve(json({ hits: [HIT] })));
+  renderPage();
+  await submitSearch();
+  await screen.findByTestId("result-1");
+  const request = new URL(fetchMock.mock.calls[1][0], "http://localhost");
+  expect(request.searchParams.has("mode")).toBe(false);
+  expect(request.searchParams.has("chunker")).toBe(false);
+});
+
 test("shows No results for an empty hit list", async () => {
   mockFetch(() => Promise.resolve(json({ hits: [] })));
   renderPage();

@@ -8,6 +8,14 @@ export interface City {
   documents: number;
 }
 
+export interface FilterValues {
+  city?: string;
+  body?: string;
+  dateFrom?: string;
+  dateTo?: string;
+  kind?: string;
+}
+
 export interface SpanRef {
   document_id: string;
   unit_index: number;
@@ -40,6 +48,36 @@ export interface SearchResponse {
   mode: string;
   chunker: string;
   hits: Hit[];
+}
+
+export interface Citation {
+  number: number;
+  document_id: string;
+  unit_index: number;
+  unit_kind: "page" | "segment";
+  start_offset: number;
+  end_offset: number;
+  quote: string;
+  city_id: string;
+  body: string;
+  meeting_date: string;
+  doc_kind: DocKind;
+  start_ms: number | null;
+  label: string;
+}
+
+export interface AskResponse {
+  declined: boolean;
+  decline_reason: string | null;
+  decline_message: string | null;
+  sentences: { text: string; citations: number[] }[];
+  citations: Citation[];
+  pipeline: string;
+  model: string | null;
+  cost_usd: number;
+  latency_ms: number;
+  cached: boolean;
+  dropped_sentences: number;
 }
 
 export type DocKind = "agenda" | "minutes" | "transcript";
