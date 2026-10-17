@@ -85,7 +85,7 @@ ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "-q --strict-markers --timeout=20 -p no:cacheprovider"
+addopts = "-q --strict-markers --timeout=20 -p no:cacheprovider -p no:langsmith_plugin"
 timeout_method = "thread"
 markers = [
   "integration: needs the PostgreSQL container",
