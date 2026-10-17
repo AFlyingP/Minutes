@@ -37,7 +37,7 @@ from minutes.labels.schema import (
     QuestionUnanswerable,
     parse_payload,
 )
-from minutes.log import get_logger
+from minutes.log import bind_correlation_id, get_correlation_id, get_logger, new_correlation_id
 from minutes.retrieval.search import Filters, Hit, search
 
 Labels = list[Label]
@@ -297,7 +297,10 @@ def _same_record(kind: str, predicted: dict[str, object], gold: dict[str, object
 
 
 def _extract_document(
-    document_id: str, cases: list[tuple[Label, ExtractionCase]], database_url: str
+    document_id: str,
+    cases: list[tuple[Label, ExtractionCase]],
+    database_url: str,
+    controls: bool,
 ) -> _ExtractionDocumentResult:
     with db.connect(database_url) as conn:
         row = conn.execute(
@@ -331,7 +334,7 @@ def _extract_document(
         try:
             raw_facts = extractor.extract_items(
                 items,
-                controls=True,
+                controls=controls,
                 sample_index=sample_index,
                 city=city,
                 body=body,
@@ -397,7 +400,13 @@ def _extraction(context: EvalContext) -> Result:
     results: list[_ExtractionDocumentResult] = []
     with ThreadPoolExecutor(max_workers=pipeline.EXTRACTION_WORKERS) as pool:
         futures: dict[Future[_ExtractionDocumentResult], str] = {
-            pool.submit(_extract_document, document_id, document_cases, database_url): document_id
+            pool.submit(
+                _extract_document,
+                document_id,
+                document_cases,
+                database_url,
+                context.controls,
+            ): document_id
             for document_id, document_cases in sorted(by_document.items())
         }
         for future in as_completed(futures):
@@ -475,6 +484,8 @@ def _answers(context: EvalContext) -> Result:
         faithfulness: list[float | None] = []
         sample_zero_latency: list[float] = []
         for sample_index in range(5):
+            # the response cache ignores the sample, so each sample starts from an empty cache
+            context.conn.execute("DELETE FROM answer_cache")
             correct_answers = 0
             declined_answerable = 0
             declined_unanswerable = 0
@@ -529,11 +540,56 @@ def _answers(context: EvalContext) -> Result:
     return pipeline_results
 
 
+def _cost(context: EvalContext) -> Result:
+    questions = _question_labels(context.labels)
+    by_city: dict[str, list[tuple[Label, QuestionAnswerable | QuestionUnanswerable]]] = {}
+    for question in questions:
+        by_city.setdefault(question[0].city, []).append(question)
+    workload = questions[:60] + [
+        question for city in sorted(by_city) for question in by_city[city][:15]
+    ]
+    context.conn.execute("DELETE FROM answer_cache")
+    total_cost = 0.0
+    previous_id = get_correlation_id()
+    try:
+        for label, payload in workload:
+            correlation_id = new_correlation_id()
+            bind_correlation_id(correlation_id)
+            answer_question(
+                context.conn,
+                payload.question,
+                Filters(city=label.city),
+                pipeline="final",
+                controls=context.controls,
+            )
+            row = context.conn.execute(
+                "SELECT coalesce(sum(cost_usd), 0) FROM llm_calls WHERE correlation_id = %s",
+                (correlation_id,),
+            ).fetchone()
+            assert row is not None
+            total_cost += float(row[0])
+    finally:
+        bind_correlation_id(previous_id)
+    key = "controls_on" if context.controls else "controls_off"
+    cost = cast(dict[str, object], context.previous.get("cost") or {}).copy()
+    per_query = round(total_cost / len(workload), 6)
+    cost[key] = {"queries": len(workload), "cost_per_query_usd": per_query}
+    other_key = "controls_off" if context.controls else "controls_on"
+    if other_key in cost:
+        on = cast(dict[str, float], cost["controls_on"])["cost_per_query_usd"]
+        off = cast(dict[str, float], cost["controls_off"])["cost_per_query_usd"]
+        cost["reduction"] = 1 - on / off if off else None
+    else:
+        cost.pop("reduction", None)
+    return cost
+
+
 SECTIONS: dict[str, Callable[[EvalContext], Result]] = {
     "retrieval": _retrieval,
     "segmentation": _segmentation,
     "extraction": _extraction,
     "answers": _answers,
+    "cost": _cost,
 }
 
 
@@ -583,10 +639,12 @@ def run_suite(
 ) -> dict[str, object]:
     """Run registered evaluation sections and merge their results into a JSON file."""
     available = (
-        {"retrieval", "segmentation", "extraction", "answers"} if suite == "gate" else set(SECTIONS)
+        {"retrieval", "segmentation", "extraction", "answers", "cost"}
+        if suite == "gate"
+        else set(SECTIONS)
     )
     if only is None and suite == "gate":
-        names = ["retrieval", "segmentation", "extraction", "answers"]
+        names = ["retrieval", "segmentation", "extraction", "answers", "cost"]
     elif only is None:
         names = list(SECTIONS)
     else:
