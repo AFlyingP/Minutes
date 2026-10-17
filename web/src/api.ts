@@ -1,5 +1,6 @@
 import type {
   City,
+  AskResponse,
   DocumentDetail,
   DocumentsResponse,
   Label,
@@ -84,6 +85,14 @@ export function search(q: string, filters: Params): Promise<SearchResponse> {
     ...filters,
     k: "10",
   });
+}
+
+export function ask(question: string, filters: Params): Promise<AskResponse> {
+  const body: Record<string, string> = { question, pipeline: "final" };
+  for (const [key, value] of Object.entries(filters)) {
+    if (value) body[key] = value;
+  }
+  return postJson<AskResponse>("/api/ask", body);
 }
 
 export function fetchDocuments(params: Params = {}): Promise<DocumentsResponse> {
