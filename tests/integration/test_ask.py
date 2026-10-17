@@ -336,6 +336,6 @@ def test_answers_section_includes_final_pipeline_with_five_runs(
     )
 
     answers = cast(dict[str, dict[str, Any]], results["answers"])
-    assert set(answers) == {"baseline", "final"}
+    assert set(answers) == {"baseline", "final", "langgraph"}
     for pipeline in answers.values():
         assert pipeline["answer_accuracy"]["runs"] == 5

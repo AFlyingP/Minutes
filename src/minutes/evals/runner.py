@@ -472,11 +472,12 @@ def _answers(context: EvalContext) -> Result:
     ]
     stored = cast(dict[str, object], context.previous.get("answers") or {}).get("baseline")
     pipeline_results: Result = {"baseline": stored} if context.suite == "full" and stored else {}
-    pipelines: tuple[Literal["baseline", "final"], ...] = (
-        ("final",)
-        if context.suite == "gate" or "baseline" in pipeline_results
-        else ("baseline", "final")
-    )
+    if context.suite == "gate":
+        pipelines: tuple[Literal["baseline", "final", "langgraph"], ...] = ("final",)
+    elif "baseline" in pipeline_results:
+        pipelines = ("final", "langgraph")
+    else:
+        pipelines = ("baseline", "final", "langgraph")
     for pipeline_name in pipelines:
         answer_accuracy: list[float | None] = []
         decline_accuracy: list[float | None] = []

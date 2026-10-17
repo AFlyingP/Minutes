@@ -142,6 +142,10 @@ def answer(
     """Answer from retrieved text only; every sentence kept cites the spans it rests on."""
     if not question.strip() or len(question) > 500:
         raise ValidationError("question: must be 1 to 500 characters")
+    if pipeline == "langgraph":
+        from minutes.answer.graph_variant import answer as graph_answer
+
+        return graph_answer(conn, question, filters, controls=controls, sample_index=sample_index)
     if pipeline not in ("baseline", "final"):
         raise ValidationError(f"pipeline {pipeline} is not available")
     started = time.perf_counter()
