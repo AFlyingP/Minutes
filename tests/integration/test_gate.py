@@ -112,25 +112,7 @@ def test_snapshot_bytes_are_reproducible(
     assert first_hash == second_hash
 
 
-def test_record_then_gate_passes_in_replay_mode(
-    gate_files: GateFiles, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-) -> None:
-    monkeypatch.setenv("MINUTES_LLM_MODE", "replay")
-    monkeypatch.setenv("MINUTES_MODELS_MODE", "replay")
-    get_settings.cache_clear()
-    assert (
-        gate.run_gate(
-            recording_dir=gate_files.recording,
-            baseline_path=gate_files.baseline,
-            labels_dir=gate_files.labels,
-            results_path=gate_files.results,
-        )
-        == 0
-    )
-    assert "gate passed" in capsys.readouterr().out
-
-
-def test_replay_makes_no_model_call_and_imports_no_gpu_library(
+def test_record_then_gate_passes_in_replay_without_model_calls_or_gpu_libraries(
     gate_files: GateFiles,
 ) -> None:
     code = (
@@ -172,6 +154,7 @@ def test_replay_makes_no_model_call_and_imports_no_gpu_library(
     output = json.loads(result.stdout.splitlines()[-1])
     assert output["result"] == 0
     assert output["gpu_modules"] == []
+    assert "gate passed" in result.stdout
 
 
 def test_missing_embedding_key_raises_stale_error(

@@ -90,7 +90,7 @@ def _declined(
     return AnswerResult(True, reason, [], [], pipeline, model, cost, latency, False, dropped)
 
 
-def _citation(number: int, hit: Hit, span: Span) -> Citation:
+def _citation(number: int, hit: Hit, span: Span, doc_kind: str, start_ms: int | None) -> Citation:
     return Citation(
         number=number,
         document_id=span.document_id,
@@ -102,8 +102,8 @@ def _citation(number: int, hit: Hit, span: Span) -> Citation:
         city_id=hit.city_id,
         body=hit.body,
         meeting_date=hit.meeting_date,
-        doc_kind=hit.doc_kind,
-        start_ms=hit.start_ms,
+        doc_kind=doc_kind,
+        start_ms=start_ms,
     )
 
 
@@ -149,6 +149,18 @@ def answer(
         return finish(_declined("no_retrieval", pipeline, started))
     names = city_names(conn)
     sources = [(hit, span) for hit in hits for span in hit.spans]
+    span_documents = [span.document_id for _, span in sources]
+    span_units = [span.unit_index for _, span in sources]
+    span_metadata = {
+        (document_id, unit_index): (doc_kind, start_ms)
+        for document_id, unit_index, doc_kind, start_ms in conn.execute(
+            "SELECT refs.document_id, refs.unit_index, d.kind, u.start_ms "
+            "FROM unnest(%s::text[], %s::int[]) AS refs(document_id, unit_index) "
+            "JOIN documents d ON d.id = refs.document_id "
+            "JOIN units u ON u.document_id = refs.document_id AND u.unit_index = refs.unit_index",
+            (span_documents, span_units),
+        ).fetchall()
+    }
     spans = [
         SourceSpan(
             number,
@@ -189,7 +201,9 @@ def answer(
         return finish(_declined("budget_exceeded", pipeline, started, results=calls))
     except LLMOutputError:
         return finish(_declined("model_error", pipeline, started, results=calls))
-    output: dict[str, Any] = result.parsed or {}
+    if result.parsed is None:
+        return finish(_declined("model_error", pipeline, started, results=calls))
+    output: dict[str, Any] = result.parsed
     if output["decline"]:
         return finish(_declined("model_declined", pipeline, started, results=calls))
     valid = [
@@ -255,7 +269,16 @@ def answer(
                 AnswerSentence(s["text"], [numbers[cited] for cited in s["citations"]])
                 for s in kept
             ],
-            citations=[_citation(new, *sources[old - 1]) for old, new in numbers.items()],
+            citations=[
+                _citation(
+                    new,
+                    *sources[old - 1],
+                    *span_metadata[
+                        (sources[old - 1][1].document_id, sources[old - 1][1].unit_index)
+                    ],
+                )
+                for old, new in numbers.items()
+            ],
             pipeline=pipeline,
             model=result.model,
             cost_usd=sum(call.cost_usd for call in calls),

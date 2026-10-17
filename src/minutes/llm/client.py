@@ -36,6 +36,8 @@ _START_LOCK = threading.Lock()
 _USAGE_LOCK = threading.Lock()
 _LAST_START: float | None = None
 PROXY_TIMEOUT = httpx.Timeout(600.0, connect=10.0)
+_HTTP_LOCK = threading.Lock()
+_HTTP: httpx.Client | None = None
 _CORRECTION = "Your previous reply was not valid JSON for the schema. Reply with JSON only."
 PER_CALL_CEILINGS = {
     "extract": 0.08,
@@ -196,6 +198,15 @@ def record_completed_call(
     )
 
 
+def _shared_http() -> httpx.Client:
+    # building a client creates an SSL context, which costs about 10 ms
+    global _HTTP
+    with _HTTP_LOCK:
+        if _HTTP is None or _HTTP.is_closed:
+            _HTTP = httpx.Client(timeout=PROXY_TIMEOUT)
+        return _HTTP
+
+
 class ThinClient:
     """OpenAI-compatible chat client with cache, quotas, retries, and accounting."""
 
@@ -210,7 +221,7 @@ class ThinClient:
         self.cache = cache
         self.clock = clock
         self.wait = wait
-        self.http = http if http is not None else httpx.Client(timeout=PROXY_TIMEOUT)
+        self.http = http if http is not None else _shared_http()
 
     def _key(
         self,

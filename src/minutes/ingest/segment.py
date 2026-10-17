@@ -6,6 +6,8 @@ from typing import Literal
 import psycopg
 from psycopg.rows import TupleRow
 
+from minutes.errors import NotFoundError, ValidationError
+
 
 @dataclass(frozen=True)
 class ItemSpan:
@@ -320,8 +322,10 @@ def run(conn: psycopg.Connection[TupleRow], document_id: str) -> dict[str, objec
         (document_id,),
     ).fetchone()
     if row is None:
-        return {"items": 0, "business": 0}
+        raise NotFoundError(f"unknown document {document_id}")
     kind, meeting_id, fmt = row
+    if fmt not in ("legistar", "granicus"):
+        raise ValidationError(f"unsupported item format {fmt}")
     if kind == "transcript":
         return {"items": 0, "business": 0}
     conn.execute("DELETE FROM items WHERE document_id = %s", (document_id,))

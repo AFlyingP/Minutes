@@ -27,7 +27,7 @@ def test_whitespace_only_chunk_is_dropped() -> None:
     assert item_chunks([(0, len(text))], text) == []
 
 
-def test_chunks_are_contiguous_and_cover_the_item_slice() -> None:
+def test_chunks_preserve_exactly_the_newline_separator_gap() -> None:
     text = "a" * 500 + "\n" + "b" * 500 + "\n" + "c" * 500
     lines = [(0, 500), (501, 1001), (1002, 1502)]
 
@@ -35,10 +35,11 @@ def test_chunks_are_contiguous_and_cover_the_item_slice() -> None:
 
     assert chunks == [(0, 1001), (1002, 1502)]
     assert text[chunks[0][1] : chunks[1][0]] == "\n"
-    assert (
-        "".join(text[start:end] for start, end in chunks)
-        == "a" * 500 + "\n" + "b" * 500 + "c" * 500
+    reconstructed = "".join(
+        text[start:end] + (text[end : chunks[index + 1][0]] if index + 1 < len(chunks) else "")
+        for index, (start, end) in enumerate(chunks)
     )
+    assert reconstructed == text
 
 
 def test_header_format_and_200_character_limit() -> None:

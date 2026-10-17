@@ -1,3 +1,4 @@
+import copy
 import json
 import re
 import tomllib
@@ -143,11 +144,17 @@ def corpus_database_url(corpus: Corpus) -> str:
     return settings.test_database_url if corpus == "fixture" else settings.database_url
 
 
+@lru_cache(maxsize=32)
+def _parsed(path: Path, mtime_ns: int, size: int) -> dict[str, Any]:
+    parse = json.loads if path.suffix == ".json" else tomllib.loads
+    return parse(path.read_text(encoding="utf-8"))
+
+
 @contextmanager
 def _reading(path: Path) -> Iterator[dict[str, Any]]:
-    parse = json.loads if path.suffix == ".json" else tomllib.loads
     try:
-        yield parse(path.read_text(encoding="utf-8"))
+        stat = path.stat()
+        yield copy.deepcopy(_parsed(path.resolve(), stat.st_mtime_ns, stat.st_size))
     except FileNotFoundError as err:
         raise ConfigError(f"config file missing: {path.name}") from err
     except KeyError as err:

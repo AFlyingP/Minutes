@@ -1,6 +1,12 @@
+from typing import cast
+
 import pytest
 from psycopg import Connection
 from psycopg.rows import TupleRow
+
+from minutes.errors import NotFoundError, ValidationError
+from minutes.ingest import chunk, segment
+from minutes.ingest.chunk import header_for
 
 pytestmark = pytest.mark.integration
 
@@ -62,16 +68,63 @@ def test_embed_text_starts_with_header_for_item_chunks_only(
     fixture_corpus: str, conn: Connection[TupleRow]
 ) -> None:
     rows = conn.execute(
-        "SELECT chunker, text, embed_text FROM chunks ORDER BY document_id, chunker, ordinal"
+        "SELECT c.chunker, c.text, c.embed_text, c.city_id, c.body, c.meeting_date, "
+        "c.doc_kind, i.identifier, i.title, city.name, u.start_ms FROM chunks c "
+        "LEFT JOIN items i ON i.id = c.item_id JOIN cities city ON city.id = c.city_id "
+        "JOIN units u ON u.document_id = c.document_id AND u.unit_index = c.unit_index "
+        "ORDER BY c.document_id, c.chunker, c.ordinal"
     ).fetchall()
 
     assert rows
-    for chunker, text, embed_text in rows:
+    for (
+        chunker,
+        text,
+        embed_text,
+        _city_id,
+        body,
+        meeting_date,
+        kind,
+        identifier,
+        title,
+        city,
+        start_ms,
+    ) in rows:
         if chunker == "item":
             assert embed_text.endswith("\n" + text)
-            assert embed_text.split("\n", 1)[0]
+            assert embed_text.split("\n", 1)[0] == header_for(
+                city,
+                body,
+                meeting_date,
+                kind,
+                identifier or "",
+                title or chunk._time_title(start_ms),
+            )
         else:
             assert embed_text == text
+
+
+def test_chunk_time_title_accepts_missing_time() -> None:
+    assert chunk._time_title(None) == ""
+
+
+def test_chunk_and_segment_reject_unknown_documents(conn: Connection[TupleRow]) -> None:
+    with pytest.raises(NotFoundError, match="unknown document missing-document"):
+        chunk.run(conn, "missing-document")
+    with pytest.raises(NotFoundError, match="unknown document missing-document"):
+        segment.run(conn, "missing-document")
+
+
+def test_segment_rejects_unknown_city_item_format() -> None:
+    class Cursor:
+        def fetchone(self) -> tuple[str, str, str]:
+            return "agenda", "meeting", "unknown"
+
+    class FakeConnection:
+        def execute(self, *_args: object) -> Cursor:
+            return Cursor()
+
+    with pytest.raises(ValidationError, match="unsupported item format unknown"):
+        segment.run(cast(Connection[TupleRow], FakeConnection()), "doc")
 
 
 def test_transcript_segment_is_one_item_chunk_without_parent(

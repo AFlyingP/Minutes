@@ -15,7 +15,8 @@ from minutes.config import get_settings, load_models
 from minutes.errors import BudgetExceeded, LLMOutputError
 from minutes.evals.runner import run_suite
 from minutes.extract import extractor
-from minutes.llm import Budget, ChatResult
+from minutes.llm import ChatResult
+from minutes.llm.client import ThinClient
 from minutes.log import bind_correlation_id, new_correlation_id
 from minutes.retrieval.search import Filters, Hit, search
 
@@ -56,6 +57,14 @@ def test_cache_key_ignores_case_whitespace_and_trailing_question_mark() -> None:
     assert cache.cache_key("  What is the total?  ", filters, "final", "v") == cache.cache_key(
         "what   IS the total", filters, "final", "v"
     )
+
+
+def test_cache_key_strips_only_trailing_question_period_and_exclamation() -> None:
+    filters = Filters(city="alder")
+    base = cache.cache_key("What was approved", filters, "final", "v")
+    for punctuation in ("?", ".", "!"):
+        assert cache.cache_key(f"WHAT WAS APPROVED{punctuation}", filters, "final", "v") == base
+    assert cache.cache_key("What was approved? .", filters, "final", "v") != base
 
 
 def test_cache_key_changes_with_filters_and_pipeline() -> None:
@@ -105,18 +114,41 @@ def test_controls_off_bypasses_cache_and_routing(
     strong, cheap = _separate_models(monkeypatch, pipeline)
     question = "What amount was authorized for Cedar Paving's sidewalk repair contract?"
     correlation_ids = [new_correlation_id(), new_correlation_id()]
+    results = []
+
+    def high_score(
+        conn: psycopg.Connection[TupleRow],
+        query: str,
+        filters: Filters,
+        *,
+        mode: Literal["keyword", "vector", "hybrid", "hybrid_rerank"],
+        chunker: Literal["fixed", "item"],
+        k: int,
+    ) -> list[Hit]:
+        from dataclasses import replace as dc_replace
+
+        return [
+            dc_replace(hit, score=0.9)
+            for hit in search(conn, query, filters, mode=mode, chunker=chunker, k=k)
+        ]
+
+    monkeypatch.setattr(pipeline, "search", high_score)
     with db.connect(fixture_corpus) as conn:
         conn.execute("DELETE FROM answer_cache")
         for correlation_id in correlation_ids:
             bind_correlation_id(correlation_id)
-            answer(conn, question, Filters(city="alder"), controls=False)
+            results.append(answer(conn, question, Filters(city="alder"), controls=False))
         rows = conn.execute(
-            "SELECT purpose, model FROM llm_calls WHERE correlation_id = ANY(%s)",
+            "SELECT correlation_id, purpose, model FROM llm_calls WHERE correlation_id = ANY(%s)",
             (correlation_ids,),
         ).fetchall()
     bind_correlation_id("-")
-    synth_models = {row[1] for row in rows if row[0] == "synth"}
-    judge_models = {row[1] for row in rows if row[0] == "judge"}
+    synth_rows = [row for row in rows if row[1] == "synth"]
+    synth_models = {row[2] for row in synth_rows}
+    judge_models = {row[2] for row in rows if row[1] == "judge"}
+    assert len(synth_rows) == 2
+    assert {row[0] for row in synth_rows} == set(correlation_ids)
+    assert all(not result.cached for result in results)
     assert synth_models == {strong}
     assert judge_models == {cheap}
 
@@ -168,20 +200,20 @@ def test_budget_aborts_before_the_call_that_would_exceed_it(
 ) -> None:
     import minutes.answer.pipeline as pipeline
 
-    calls = 0
     settings = get_settings()
+    client = ThinClient()
+    calls = 0
 
-    class Client:
-        def chat(self, **kwargs: object) -> ChatResult:
-            nonlocal calls
-            cast(Budget, kwargs["budget"]).check(1.0)
-            calls += 1
-            raise AssertionError("call should have exceeded the budget")
+    def request(**kwargs: object) -> dict[str, object]:
+        nonlocal calls
+        calls += 1
+        raise AssertionError("request should have been stopped by budget estimation")
 
-    monkeypatch.setattr(pipeline, "get_client", lambda: Client())
+    monkeypatch.setattr(client, "_request", request)
+    monkeypatch.setattr(pipeline, "get_client", lambda: client)
     monkeypatch.setattr(
         "minutes.answer.pipeline.get_settings",
-        lambda: settings.model_copy(update={"query_budget_usd": 0.01}),
+        lambda: settings.model_copy(update={"query_budget_usd": 0.0000000001}),
     )
     with db.connect(fixture_corpus) as conn:
         result = answer(conn, "What was approved for Cedar Paving?", Filters(city="alder"))

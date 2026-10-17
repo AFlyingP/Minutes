@@ -54,7 +54,9 @@ def test_bare_anchor_without_title_start_uses_anchor_line_as_title() -> None:
 
 
 def test_identifier_in_running_text_starts_nothing() -> None:
-    items = parse("A. OTHER BUSINESS\nTitle mentions Clerk File 314512.\nSee CB 120725 mid-line")
+    items = parse(
+        "A. OTHER BUSINESS\nTitle mentions Clerk File 314512.\nSee CB 120725 in this sentence."
+    )
 
     assert not [item for item in items if item.kind == "business"]
 

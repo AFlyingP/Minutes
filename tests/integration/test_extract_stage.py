@@ -15,6 +15,7 @@ from minutes.errors import LLMOutputError, LLMQuotaError, StageError
 from minutes.evals.runner import run_suite
 from minutes.extract import extractor
 from minutes.ingest import pipeline
+from minutes.llm import ChatResult
 from minutes.llm.prompts import ItemText
 
 pytestmark = pytest.mark.integration
@@ -70,6 +71,11 @@ def test_fixture_vote_facts_are_verified(
     unit_index, quote_start, quote_end, text = row
     assert unit_index == 2
     assert text[quote_start:quote_end].startswith("Ayes: Gray")
+    facts = conn.execute(
+        "SELECT data->>'ayes', data->>'noes' FROM facts WHERE document_id = 'birch-minutes-201' "
+        "AND kind = 'vote' AND verified AND data->>'subject_identifier' = 'RESOLUTION 2024-07'"
+    ).fetchone()
+    assert facts == ("4", "1")
 
 
 def test_table_vote_is_verified(conn: psycopg.Connection[TupleRow], fixture_corpus: str) -> None:
@@ -86,29 +92,37 @@ def test_wrong_vote_count_is_rejected_and_stored(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     document_id = "birch-minutes-201"
-    matched = next(
-        entry
-        for entry in extractor.item_texts(conn, document_id)
-        if "Ayes: Gray, Hale, Ivers, Jones" in entry.text
-    )
     quote = "Ayes: Gray, Hale, Ivers, Jones\nNoes: King"
-    fact = extractor.RawFact(
-        matched.item_id,
-        "vote",
-        quote,
-        {
-            "subject_identifier": "RESOLUTION 2024-07",
-            "ayes": 5,
-            "noes": 1,
-            "abstain": 0,
-            "absent": 0,
-            "members": [],
-            "outcome": "passed",
-        },
-    )
-    monkeypatch.setattr(extractor, "extract_items", lambda *args, **kwargs: [fact])
 
-    extractor.run(conn, document_id)
+    class Client:
+        def chat(self, **kwargs: object) -> ChatResult:
+            messages = cast(list[dict[str, str]], kwargs["messages"])
+            content = messages[-1]["content"]
+            if quote not in content:
+                return ChatResult("{}", {"records": []}, "fake", 0, 0, 0.0, 0, False)
+            record = {
+                "item": 1,
+                "kind": "vote",
+                "quote": quote,
+                "motion": None,
+                "vote": {
+                    "subject_identifier": "RESOLUTION 2024-07",
+                    "ayes": 5,
+                    "noes": 1,
+                    "abstain": 0,
+                    "absent": 0,
+                    "members": [],
+                    "outcome": "passed",
+                },
+                "ordinance": None,
+                "amount": None,
+                "statement": None,
+            }
+            return ChatResult("{}", {"records": [record]}, "fake", 0, 0, 0.0, 0, False)
+
+    monkeypatch.setattr(extractor, "get_client", Client)
+
+    extractor.run(conn, document_id, controls=False)
 
     row = conn.execute(
         "SELECT verified, verify_error FROM facts WHERE document_id = %s AND quote = %s",
@@ -184,6 +198,37 @@ def test_record_with_wrong_kind_object_is_rejected_as_kind_mismatch(
         "SELECT verified, verify_error FROM facts WHERE document_id = 'alder-minutes-101'"
     ).fetchone()
     assert row == (False, error)
+
+
+def test_item_number_not_in_batch_is_stored_as_kind_mismatch(
+    conn: psycopg.Connection[TupleRow],
+    fixture_corpus: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class Client:
+        calls = 0
+
+        def chat(self, **kwargs: object) -> ChatResult:
+            self.calls += 1
+            record = {
+                "item": 99,
+                "kind": "motion",
+                "quote": "not used",
+                "motion": {"text": "approve", "mover": None, "seconder": None, "outcome": "passed"},
+                "vote": None,
+                "ordinance": None,
+                "amount": None,
+                "statement": None,
+            }
+            return ChatResult("{}", {"records": [record]}, "fake", 0, 0, 0.0, 0, False)
+
+    client = Client()
+    monkeypatch.setattr(extractor, "get_client", lambda: client)
+    extractor.run(conn, "alder-minutes-101", controls=False)
+    row = conn.execute(
+        "SELECT verified, verify_error FROM facts WHERE document_id = 'alder-minutes-101'"
+    ).fetchone()
+    assert row == (False, "kind_mismatch")
 
 
 def test_transcript_statements_from_speaker_labels_without_llm_call(

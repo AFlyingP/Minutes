@@ -3,6 +3,8 @@ from datetime import date
 import psycopg
 from psycopg.rows import TupleRow
 
+from minutes.errors import NotFoundError
+
 WINDOW = 1200
 STEP = 1000
 
@@ -77,7 +79,9 @@ def _line_ranges(start: int, end: int, text: str) -> list[tuple[int, int]]:
     return ranges
 
 
-def _time_title(start_ms: int) -> str:
+def _time_title(start_ms: int | None) -> str:
+    if start_ms is None:
+        return ""
     seconds = start_ms // 1000
     hours, remainder = divmod(seconds, 3600)
     minutes, seconds = divmod(remainder, 60)
@@ -93,7 +97,8 @@ def run(conn: psycopg.Connection[TupleRow], document_id: str) -> dict[str, objec
         "JOIN meetings m ON m.id = d.meeting_id WHERE d.id = %s",
         (document_id,),
     ).fetchone()
-    assert document is not None
+    if document is None:
+        raise NotFoundError(f"unknown document {document_id}")
     kind, city_name, body, meeting_date, city_id = document
     units = conn.execute(
         "SELECT unit_index, text, start_ms FROM units WHERE document_id = %s ORDER BY unit_index",

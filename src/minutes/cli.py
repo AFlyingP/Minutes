@@ -396,7 +396,6 @@ def extract_run(
     except LLMQuotaError:
         quota_pause()
     typer.echo(f"extract: {summary_line(result)}")
-    typer.echo(summary_line(result))
     if result.dead:
         raise typer.Exit(1)
 

@@ -26,8 +26,8 @@ def corpus_version(conn: psycopg.Connection[TupleRow]) -> str:
     return hashlib.sha256(f"{count}:{maximum}".encode()).hexdigest()
 
 
-def cache_key(question: str, filters: Filters, pipeline: str, version: str = "") -> str:
-    normalized = " ".join(question.lower().split()).rstrip("?!. ")
+def cache_key(question: str, filters: Filters, pipeline: str, version: str) -> str:
+    normalized = " ".join(question.lower().split()).rstrip("?.!")
     filter_values = asdict(filters)
     canonical_filters = {
         key: value.isoformat() if isinstance(value, date) else value

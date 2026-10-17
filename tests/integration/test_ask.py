@@ -1,3 +1,4 @@
+from dataclasses import replace
 from pathlib import Path
 from typing import Any, cast
 
@@ -5,10 +6,13 @@ import pytest
 from fastapi.testclient import TestClient
 
 from minutes import db
+from minutes.answer.pipeline import answer
 from minutes.api.app import create_app
 from minutes.config import get_settings
 from minutes.evals.runner import run_suite
 from minutes.llm import ChatResult
+from minutes.llm.client import ThinClient
+from minutes.retrieval.search import Filters, Span, search, span_label
 
 pytestmark = pytest.mark.integration
 
@@ -96,7 +100,7 @@ def test_unsupported_sentence_is_dropped_and_counted(
         [
             {"text": "The council voted 4 to 1.", "citations": [1]},
             {"text": "The roll call is recorded.", "citations": [1]},
-            {"text": "The airport opened in 1999.", "citations": [1]},
+            {"text": "The proposal was approved in 2024.", "citations": [1]},
         ],
         [
             {"sentence": 1, "supported": True},
@@ -173,16 +177,15 @@ def test_model_decline_flag_gives_model_declined(
 def test_invalid_output_twice_gives_model_error(
     fixture_corpus: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    class InvalidClient:
-        attempts = 0
+    invalid = ThinClient()
+    attempts = 0
 
-        def chat(self, **kwargs: Any) -> ChatResult:
-            from minutes.errors import LLMOutputError
+    def invalid_request(**kwargs: Any) -> dict[str, Any]:
+        nonlocal attempts
+        attempts += 1
+        return {"text": "not valid json", "prompt_tokens": 1, "completion_tokens": 1}
 
-            self.attempts += 2
-            raise LLMOutputError("invalid output")
-
-    invalid = InvalidClient()
+    monkeypatch.setattr(invalid, "_request", invalid_request)
     monkeypatch.setattr("minutes.answer.pipeline.get_client", lambda: invalid)
     result = (
         TestClient(create_app())
@@ -192,7 +195,82 @@ def test_invalid_output_twice_gives_model_error(
 
     assert result["declined"] is True
     assert result["decline_reason"] == "model_error"
-    assert invalid.attempts == 2
+    assert attempts == 2
+
+
+def test_none_parsed_output_declines_as_model_error(
+    fixture_corpus: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    class EmptyClient:
+        def chat(self, **kwargs: Any) -> ChatResult:
+            return ChatResult("", None, "stub", 0, 0, 0.0, 0, False)
+
+    monkeypatch.setattr("minutes.answer.pipeline.get_client", EmptyClient)
+    result = (
+        TestClient(create_app())
+        .post("/api/ask", json={"question": DEMO_QUESTION, "city": "birch"})
+        .json()
+    )
+    assert result["declined"] is True
+    assert result["decline_reason"] == "model_error"
+
+
+def test_linked_span_citation_uses_its_own_document_and_unit_metadata(
+    fixture_corpus: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    class CapturingClient(AnswerClient):
+        synth_prompt = ""
+
+        def chat(self, *, purpose: str, **kwargs: Any) -> ChatResult:
+            if purpose == "synth":
+                messages = cast(list[dict[str, str]], kwargs["messages"])
+                self.synth_prompt = messages[-1]["content"]
+            return super().chat(purpose=purpose, **kwargs)
+
+    client = CapturingClient(
+        [{"text": "An agenda item is listed.", "citations": [1]}],
+        [{"sentence": 1, "supported": True}],
+    )
+    monkeypatch.setattr("minutes.answer.pipeline.get_client", lambda: client)
+    with db.connect(fixture_corpus) as conn:
+        hit = search(
+            conn,
+            DEMO_QUESTION,
+            Filters(city="birch"),
+            mode="hybrid_rerank",
+            chunker="item",
+            k=8,
+        )[0]
+        agenda_row = conn.execute(
+            "SELECT agenda.id FROM documents agenda JOIN documents minutes "
+            "ON minutes.meeting_id = agenda.meeting_id "
+            "WHERE minutes.id = %s AND agenda.kind = 'agenda'",
+            (hit.document_id,),
+        ).fetchone()
+        assert agenda_row is not None
+        (agenda_id,) = agenda_row
+        unit_row = conn.execute(
+            "SELECT unit_index, unit_kind, text, start_ms FROM units "
+            "WHERE document_id = %s ORDER BY unit_index LIMIT 1",
+            (agenda_id,),
+        ).fetchone()
+        assert unit_row is not None
+        unit_index, unit_kind, text, start_ms = unit_row
+        linked_span = Span(0, agenda_id, unit_index, unit_kind, 0, len(text), text)
+        monkeypatch.setattr(
+            "minutes.answer.pipeline.search",
+            lambda *args, **kwargs: [replace(hit, spans=[linked_span])],
+        )
+        result = answer(conn, DEMO_QUESTION, Filters(city="birch"), controls=False)
+
+    citation = result.citations[0]
+    assert citation.document_id == agenda_id
+    assert citation.doc_kind == "agenda"
+    assert citation.start_ms == start_ms
+    # the source heading names the hit, as the interface defines it
+    assert f"{hit.doc_kind}, {span_label(unit_kind, unit_index, hit.start_ms)}" in (
+        client.synth_prompt
+    )
 
 
 def test_budget_exceeded_declines(fixture_corpus: str, monkeypatch: pytest.MonkeyPatch) -> None:
