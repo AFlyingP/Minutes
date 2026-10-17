@@ -854,6 +854,15 @@ def agent_command(question: str, corpus: CorpusOption = None) -> None:
     typer.echo(result.answer)
 
 
+@app.command("mcp")
+def mcp_command(corpus: CorpusOption = None) -> None:
+    """Run the MCP server over stdio."""
+    use_corpus(corpus)
+    from minutes.agent.mcp_server import main as mcp_main
+
+    mcp_main()
+
+
 @app.command("serve")
 def serve(port: Annotated[int | None, typer.Option()] = None, corpus: CorpusOption = None) -> None:
     """Run the HTTP API on 127.0.0.1."""
