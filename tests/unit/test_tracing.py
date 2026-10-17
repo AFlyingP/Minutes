@@ -87,7 +87,7 @@ def test_llm_call_emits_span_with_token_and_cost_attributes(
     attrs = span.attributes
     assert attrs is not None
     assert attrs["gen_ai.system"] == "openai"
-    assert attrs["gen_ai.request.model"] == "gpt-6.1-sol"
+    assert attrs["gen_ai.request.model"] == config.load_models().strong
     assert attrs["gen_ai.usage.input_tokens"] == 12
     assert attrs["gen_ai.usage.output_tokens"] == 2
     assert isinstance(attrs["minutes.cost_usd"], float)

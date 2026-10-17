@@ -11,6 +11,7 @@ from minutes.errors import LLMOutputError, LLMTransportError, StageError
 from minutes.extract.schema import EXTRACTION_SCHEMA, FACT_MODELS
 from minutes.extract.verify import verify
 from minutes.llm.prompts import EXTRACT_SYSTEM, ItemText, extract_user
+from minutes.llm.routing import is_easy_batch
 from minutes.log import get_logger
 
 MIN_ITEM_CHARS = 40
@@ -24,18 +25,13 @@ def get_client() -> llm.LLMClient:
     return llm.get_client()
 
 
-def extract_model() -> str:
-    """The model ID configured for the extract purpose."""
-    models = load_models()
-    return models.cheap if models.purposes["extract"].model == "cheap" else models.strong
-
-
 @dataclass(frozen=True)
 class RawFact:
     item_id: int | None
     kind: str
     quote: str
     data: dict[str, object]
+    model: str | None = None
     error: str | None = None
 
 
@@ -90,6 +86,12 @@ def extract_items(
     client = get_client()
     for batch in groups:
         numbered = [item._replace(number=index) for index, item in enumerate(batch, start=1)]
+        models = load_models()
+        model = (
+            models.cheap
+            if controls and is_easy_batch([item.text for item in batch])
+            else models.strong
+        )
         result = client.chat(
             purpose="extract",
             messages=[
@@ -101,7 +103,7 @@ def extract_items(
             ],
             schema=EXTRACTION_SCHEMA,
             schema_name="extraction",
-            model=extract_model(),
+            model=model,
             sample_index=sample_index,
         )
         assert result.parsed is not None
@@ -121,7 +123,7 @@ def extract_items(
                     error = "invalid_record"
             quote = record["quote"].strip()[:MAX_QUOTE_CHARS]
             item_id = item.item_id if item is not None else None
-            facts.append(RawFact(item_id, kind, quote, data, error))
+            facts.append(RawFact(item_id, kind, quote, data, model, error))
     return facts
 
 
@@ -314,7 +316,7 @@ def run(
                 Jsonb(fact.data),
                 verified,
                 verify_error,
-                extract_model(),
+                fact.model,
             ),
         )
         rejected += not verified

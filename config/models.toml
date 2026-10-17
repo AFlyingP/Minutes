@@ -1,4 +1,4 @@
-strong = "gpt-6.1-sol"
+strong = "gpt-6-luna"
 cheap = "gpt-6-luna"
 embedder = "BAAI/bge-base-en-v1.5"
 reranker = "BAAI/bge-reranker-v2-m3"

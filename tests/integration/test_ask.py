@@ -4,6 +4,7 @@ from typing import Any, cast
 import pytest
 from fastapi.testclient import TestClient
 
+from minutes import db
 from minutes.api.app import create_app
 from minutes.config import get_settings
 from minutes.evals.runner import run_suite
@@ -12,6 +13,13 @@ from minutes.llm import ChatResult
 pytestmark = pytest.mark.integration
 
 DEMO_QUESTION = "How did the council vote on the Granite Works contract in Resolution 2024-07?"
+
+
+@pytest.fixture(autouse=True)
+def empty_answer_cache(fixture_corpus: str) -> None:
+    # the tests ask the same question through different model fakes, so none may hit the cache
+    with db.connect(fixture_corpus) as conn:
+        conn.execute("DELETE FROM answer_cache")
 
 
 class AnswerClient:

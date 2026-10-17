@@ -55,7 +55,7 @@ def test_fault_rejected_outside_fixture(monkeypatch: pytest.MonkeyPatch) -> None
 
 
 def test_load_models_and_prices() -> None:
-    assert load_models().strong == "gpt-6.1-sol"
+    assert load_models().strong == "gpt-6-luna"
     assert load_prices()["gpt-6-luna"].output_per_mtok == 0.5
 
 

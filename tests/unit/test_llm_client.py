@@ -185,7 +185,7 @@ def test_retry_on_500_three_times_then_transport_error(tmp_path: Path) -> None:
     with pytest.raises(LLMTransportError):
         client.chat(purpose="synth", messages=messages)
     key = cache_key(
-        "gpt-6.1-sol",
+        config.load_models().strong,
         messages,
         {
             "max_completion_tokens": 900,

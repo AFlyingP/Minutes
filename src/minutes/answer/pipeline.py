@@ -7,6 +7,7 @@ import psycopg
 from psycopg.rows import TupleRow
 
 from minutes import llm
+from minutes.answer import cache
 from minutes.answer.faithfulness import check_answer
 from minutes.config import get_settings, load_models
 from minutes.errors import BudgetExceeded, LLMOutputError, ValidationError
@@ -20,6 +21,7 @@ from minutes.llm.prompts import (
     judge_user,
     synth_user,
 )
+from minutes.llm.routing import is_easy_question
 from minutes.retrieval.search import Filters, Hit, Span, city_names, search, span_label
 
 K = 8
@@ -121,6 +123,20 @@ def answer(
         raise ValidationError(f"pipeline {pipeline} is not available")
     started = time.perf_counter()
     is_final = pipeline == "final"
+    response_key = None
+    if is_final and controls:
+        response_key = cache.cache_key(question, filters, pipeline, cache.corpus_version(conn))
+        cached = cache.get(conn, response_key)
+        if cached is not None:
+            return cached
+
+    def finish(result: AnswerResult) -> AnswerResult:
+        if response_key is not None and not (
+            result.declined and result.decline_reason in ("budget_exceeded", "model_error")
+        ):
+            cache.put(conn, response_key, result)
+        return result
+
     hits = search(
         conn,
         question,
@@ -130,7 +146,7 @@ def answer(
         k=K,
     )
     if not hits or (is_final and hits[0].score < MIN_RERANK_SCORE):
-        return _declined("no_retrieval", pipeline, started)
+        return finish(_declined("no_retrieval", pipeline, started))
     names = city_names(conn)
     sources = [(hit, span) for hit in hits for span in hit.spans]
     spans = [
@@ -147,8 +163,14 @@ def answer(
     ]
     calls: list[ChatResult] = []
     budget = Budget(get_settings().query_budget_usd) if is_final else None
-    # the final pipeline writes with the cheap model; the baseline keeps the synth purpose model
-    model = load_models().cheap if is_final else None
+    models = load_models()
+    model = None
+    if is_final:
+        model = (
+            models.cheap
+            if controls and is_easy_question(question, hits[0].score)
+            else models.strong
+        )
     try:
         result = get_client().chat(
             purpose="synth",
@@ -164,12 +186,12 @@ def answer(
         )
         calls.append(result)
     except BudgetExceeded:
-        return _declined("budget_exceeded", pipeline, started, results=calls)
+        return finish(_declined("budget_exceeded", pipeline, started, results=calls))
     except LLMOutputError:
-        return _declined("model_error", pipeline, started, results=calls)
+        return finish(_declined("model_error", pipeline, started, results=calls))
     output: dict[str, Any] = result.parsed or {}
     if output["decline"]:
-        return _declined("model_declined", pipeline, started, results=calls)
+        return finish(_declined("model_declined", pipeline, started, results=calls))
     valid = [
         s
         for s in output["sentences"]
@@ -207,9 +229,9 @@ def answer(
         try:
             supported = check_answer(judge_inputs, judge)
         except BudgetExceeded:
-            return _declined("budget_exceeded", pipeline, started, dropped, calls)
+            return finish(_declined("budget_exceeded", pipeline, started, dropped, calls))
         except LLMOutputError:
-            return _declined("model_error", pipeline, started, dropped, calls)
+            return finish(_declined("model_error", pipeline, started, dropped, calls))
         kept = [
             sentence
             for sentence, is_supported in zip(valid, supported, strict=True)
@@ -217,25 +239,28 @@ def answer(
         ]
         dropped += len(valid) - len(kept)
         if not kept or dropped / len(output["sentences"]) > MAX_DROPPED_SHARE:
-            return _declined("unsupported", pipeline, started, dropped, calls)
+            return finish(_declined("unsupported", pipeline, started, dropped, calls))
     if not kept:
-        return _declined("unsupported", pipeline, started, dropped, calls)
+        return finish(_declined("unsupported", pipeline, started, dropped, calls))
     # sources are renumbered in the order the answer first uses them
     numbers: dict[int, int] = {}
     for sentence in kept:
         for cited in sentence["citations"]:
             numbers.setdefault(cited, len(numbers) + 1)
-    return AnswerResult(
-        declined=False,
-        decline_reason=None,
-        sentences=[
-            AnswerSentence(s["text"], [numbers[cited] for cited in s["citations"]]) for s in kept
-        ],
-        citations=[_citation(new, *sources[old - 1]) for old, new in numbers.items()],
-        pipeline=pipeline,
-        model=result.model,
-        cost_usd=sum(call.cost_usd for call in calls),
-        latency_ms=_latency_ms(started, calls),
-        cached=False,
-        dropped_sentences=dropped,
+    return finish(
+        AnswerResult(
+            declined=False,
+            decline_reason=None,
+            sentences=[
+                AnswerSentence(s["text"], [numbers[cited] for cited in s["citations"]])
+                for s in kept
+            ],
+            citations=[_citation(new, *sources[old - 1]) for old, new in numbers.items()],
+            pipeline=pipeline,
+            model=result.model,
+            cost_usd=sum(call.cost_usd for call in calls),
+            latency_ms=_latency_ms(started, calls),
+            cached=False,
+            dropped_sentences=dropped,
+        )
     )
