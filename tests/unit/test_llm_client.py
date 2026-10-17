@@ -465,6 +465,7 @@ def test_concurrent_calls_keep_usage_cache_and_call_rows_correct(
                 call_rows.append(params)
 
     monkeypatch.setattr(client_module, "_record_call", record_call)
+    monkeypatch.setattr(client_module, "_call_log", threading.local())
     monkeypatch.setattr(psycopg, "connect", lambda *args, **kwargs: FakeConnection())
     root = tmp_path / "cache"
     clients = (
@@ -557,7 +558,11 @@ def test_api_key_never_appears_in_logs_or_cache(
     from minutes.llm import client as client_module
 
     monkeypatch.setattr(client_module, "_record_call", record_call)
+    monkeypatch.setattr(client_module, "_call_log", threading.local())
     monkeypatch.setattr(logging.getLogger("minutes"), "propagate", True)
+    # earlier CLI tests leave handlers on this logger; with propagation each record would be
+    # captured twice
+    monkeypatch.setattr(logging.getLogger("minutes"), "handlers", [])
 
     def unavailable_database(*args: object, **kwargs: object) -> None:
         raise psycopg.OperationalError("database unavailable")

@@ -4,10 +4,10 @@ from datetime import date
 from decimal import Decimal
 from typing import cast
 
+from minutes import llm
 from minutes.answer import faithfulness
 from minutes.evals.metrics import cohen_kappa
 from minutes.labels.schema import Label, QuestionAnswerable, parse_payload
-from minutes.llm import get_client
 from minutes.llm.prompts import (
     CORRECT_SCHEMA,
     GRADE_ANSWER_SYSTEM,
@@ -16,6 +16,11 @@ from minutes.llm.prompts import (
     JUDGE_USER,
     SUPPORTED_SCHEMA,
 )
+
+
+def get_client() -> llm.LLMClient:
+    """Get the current LLM client, allowing callers to replace the factory."""
+    return llm.get_client()
 
 
 @dataclass(frozen=True)

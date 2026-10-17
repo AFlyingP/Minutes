@@ -19,7 +19,7 @@ max_tokens = 300
 reasoning_effort = "low"
 
 [purposes.grade]
-model = "strong"
+model = "cheap"
 max_tokens = 300
 reasoning_effort = "low"
 

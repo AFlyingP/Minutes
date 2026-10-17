@@ -7,6 +7,7 @@ import threading
 import time
 from collections.abc import Callable
 from datetime import UTC, datetime
+from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
@@ -81,6 +82,42 @@ def request_cache_key(
     return cache_key(model, messages, params, sample_index)
 
 
+@lru_cache(maxsize=32)
+def _validator(schema_json: str) -> Any:
+    """A checked validator per schema; checking the schema on every reply was slow."""
+    schema = json.loads(schema_json)
+    validator_class = jsonschema.validators.validator_for(schema)
+    validator_class.check_schema(schema)
+    return validator_class(schema)
+
+
+CALL_INSERT = (
+    "INSERT INTO llm_calls "
+    "(correlation_id, purpose, model, cache_key, cached, prompt_tokens, "
+    "completion_tokens, cost_usd, latency_ms) "
+    "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)"
+)
+# one call log connection per thread and database: opening one per call took longer
+# than a stub call itself
+_call_log = threading.local()
+
+
+def _insert_call_row(url: str, params: tuple[object, ...]) -> None:
+    connections: dict[str, Any] = vars(_call_log).setdefault("connections", {})
+    conn = connections.pop(url, None)
+    if conn is not None:
+        try:
+            conn.execute(CALL_INSERT, params)
+            connections[url] = conn
+            return
+        except psycopg.Error:
+            # a database reset ends open sessions, so the row goes through a new connection
+            conn.close()
+    conn = psycopg.connect(url, autocommit=True, connect_timeout=10)
+    conn.execute(CALL_INSERT, params)
+    connections[url] = conn
+
+
 def _record_call(
     *,
     purpose: str,
@@ -94,26 +131,20 @@ def _record_call(
 ) -> None:
     settings = get_settings()
     try:
-        with psycopg.connect(
-            corpus_database_url(settings.corpus), autocommit=True, connect_timeout=10
-        ) as conn:
-            conn.execute(
-                "INSERT INTO llm_calls "
-                "(correlation_id, purpose, model, cache_key, cached, prompt_tokens, "
-                "completion_tokens, cost_usd, latency_ms) "
-                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)",
-                (
-                    get_correlation_id(),
-                    purpose,
-                    model,
-                    key,
-                    cached,
-                    prompt_tokens,
-                    completion_tokens,
-                    cost,
-                    latency_ms,
-                ),
-            )
+        _insert_call_row(
+            corpus_database_url(settings.corpus),
+            (
+                get_correlation_id(),
+                purpose,
+                model,
+                key,
+                cached,
+                prompt_tokens,
+                completion_tokens,
+                cost,
+                latency_ms,
+            ),
+        )
     except psycopg.Error as err:
         _LOG.warning(
             "could not record llm call",
@@ -369,7 +400,7 @@ class ThinClient:
             return None
         try:
             value = json.loads(text)
-            jsonschema.validate(value, schema)
+            _validator(json.dumps(schema, sort_keys=True)).validate(value)
         except (ValueError, jsonschema.ValidationError):
             raise LLMOutputError("invalid JSON or schema mismatch") from None
         if not isinstance(value, dict):

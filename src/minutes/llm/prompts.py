@@ -58,6 +58,8 @@ Rules:
 - For each sentence, list the numbers of the sources that support it. Every sentence must cite at least one source.
 - State only what the sources say. Do not use outside knowledge.
 - Give vote counts, dollar amounts, dates, and identifiers exactly as the sources give them.
+- Write every number in digits, never in words (4, not four; 0, not none). Copy dollar amounts and identifiers exactly as the source text prints them; when an identifier is printed both short and spelled out, give the short form, for example "CB 120588", not "Council Bill 120588".
+- Answer only what was asked. Do not repeat dates, names, or numbers from the question unless the cited source text itself contains them.
 - If the sources do not contain the answer, set "decline" to true and return no sentences.
 Reply with JSON only."""
 
@@ -69,6 +71,9 @@ Sources:
 
 JUDGE_USER = """\
 {blocks}"""
+
+JUDGE_SYSTEM = """\
+You check whether sentences are supported by source text. A sentence is supported when every factual claim in it is stated in its sources or follows directly from them, for example by counting listed names. Judge each sentence only against its own sources. Give one verdict per sentence, using the sentence numbers given. Reply with JSON only."""
 
 GRADE_ANSWER_SYSTEM = """\
 You grade an answer to a question against a reference answer. The answer is correct when it states the same fact as the reference answer and does not contradict it. Extra detail is allowed. An answer that declines or says the information is not available is incorrect. Reply with JSON only."""
@@ -135,6 +140,16 @@ def synth_user(question: str, spans: list[SourceSpan]) -> str:
         f"[{s.number}] {s.city} {s.body}, {s.date}, {s.kind}, {s.label}\n{s.text}" for s in spans
     )
     return SYNTH_USER.format(question=question, sources=sources)
+
+
+def judge_user(sentences: list[tuple[str, list[str]]]) -> str:
+    blocks = []
+    for number, (sentence, sources) in enumerate(sentences, start=1):
+        source_text = "\n---\n".join(sources)
+        blocks.append(
+            f"Sentence {number}: {sentence}\nSources for sentence {number}:\n{source_text}"
+        )
+    return JUDGE_USER.format(blocks="\n\n".join(blocks))
 
 
 def extract_user(city: str, body: str, date: str, kind: str, items: list[ItemText]) -> str:
