@@ -27,12 +27,12 @@
 | answer latency p95 | 6911 | n/a | full |
 | parse quality lincoln | 0.9309 | n/a | lincoln |
 | parse quality seattle | 0.978 | n/a | seattle |
-| pgvector ANN recall@10 | n/a | n/a | full |
-| pgvector ANN p50 | n/a | n/a | full |
-| pgvector ANN p95 | n/a | n/a | full |
-| Qdrant ANN recall@10 | n/a | n/a | full |
-| Qdrant ANN p50 | n/a | n/a | full |
-| Qdrant ANN p95 | n/a | n/a | full |
+| pgvector ANN recall@10 | 0.8183 | n/a | full |
+| pgvector ANN p50 | 11.9326 | n/a | full |
+| pgvector ANN p95 | 18.8187 | n/a | full |
+| Qdrant ANN recall@10 | 0.845 | n/a | full |
+| Qdrant ANN p50 | 14.5465 | n/a | full |
+| Qdrant ANN p95 | 33.7882 | n/a | full |
 | answer grader agreement | 1 | n/a | full |
 | support grader agreement | 1 | n/a | full |
 | labels written by an automated pass | 320 | n/a | full |
