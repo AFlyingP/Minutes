@@ -1,19 +1,19 @@
 {
   "counts": {
     "documents": 90,
-    "embeddings": 4554,
-    "llm": 1088,
-    "rerank": 2839,
+    "embeddings": 4631,
+    "llm": 1431,
+    "rerank": 5883,
     "units": 2337
   },
   "files": {
-    "embeddings.npz": "071566d1f99ad2d79fb225f16e8d4842612d10b4eabbb49302a5fb2644eacd2f",
-    "llm.jsonl.gz": "f5bb777fe2ade2e5c7560cc202f1d39f6b53544be64f9434f2ef6cc614d85885",
-    "rerank.jsonl.gz": "1ccc5faa8a5b9034f77a1619f57b7fc824b2b240fc0fdbb281c43ac8ce05c8dc",
+    "embeddings.npz": "8210968c7c834136bd4c15ad67016e13db9d365bcadea68b4897d11139974b3a",
+    "llm.jsonl.gz": "79f62cae32cec86ba6bb8ef7bdde0acdf093f1c1974d591f7197c167802837b4",
+    "rerank.jsonl.gz": "af9cf0d674d0967bc506e53d2b581247483720aa61cd874624ae95d0e92250e7",
     "snapshot.jsonl.gz": "8e1ec205eebe5de24764e855de466b6a0cc3f43c7bd7aab3b3f1a18652e76708"
   },
-  "git_commit": "d1994776c1eed8976c95ce00d32a78bb5a7dffaf",
-  "recorded_utc": "2026-10-17T04:43:48Z",
+  "git_commit": "834e5f9f1145b23d735f41d35758b7410d20b966",
+  "recorded_utc": "2026-10-17T23:13:27Z",
   "stage_versions": {
     "chunk": 2,
     "embed": 1,

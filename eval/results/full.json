@@ -1,4 +1,24 @@
 {
+  "agent": {
+    "completion": {
+      "max": 0.5,
+      "median": 0.45,
+      "min": 0.3,
+      "runs": 5
+    },
+    "doc_recall": {
+      "max": 0.275,
+      "median": 0.15,
+      "min": 0.05,
+      "runs": 5
+    },
+    "mean_steps": {
+      "max": 1.6,
+      "median": 1.05,
+      "min": 0.65,
+      "runs": 5
+    }
+  },
   "answers": {
     "baseline": {
       "answer_accuracy": {
@@ -179,8 +199,8 @@
     },
     "verifier_reject_rate": 0.0672
   },
-  "generated_utc": "2026-10-17T09:47:24Z",
-  "git_commit": "65077805c5461926751c3f6c3433a5096670bcc5",
+  "generated_utc": "2026-10-17T17:27:46Z",
+  "git_commit": "8065bc69ca20481f5cd20b484bb393fe43f7c33c",
   "grader": {
     "answer": {
       "accuracy": 1.0,

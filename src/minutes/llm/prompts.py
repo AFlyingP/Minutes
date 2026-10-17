@@ -97,6 +97,8 @@ Actions:
 Rules:
 - You have at most 8 search or sql steps. Plan before you act and stop as soon as you can answer.
 - Base the answer only on results you received. If the records do not answer the question, say so in the final answer.
+- city is the lowercase city id (for example lincoln or seattle), not the city name; body is the full body name, such as City Council or Planning Commission; dates are YYYY-MM-DD. The views use the same values.
+- Prefer one sql query that computes the answer over several searches.
 - Set the fields of actions you are not using to null.
 Reply with JSON only."""
 

@@ -19,7 +19,7 @@
 | faithfulness baseline | 0.9286 | 5 (0.9286 / 0.9286 / 0.9643) | full |
 | faithfulness final | 0.9762 | 5 (0.9756 / 0.9762 / 1) | full |
 | decline accuracy final | 1 | 5 (1 / 1 / 1) | full |
-| agent task completion | n/a | n/a | full |
+| agent task completion | 0.45 | 5 (0.3 / 0.45 / 0.5) | full |
 | cost per query, controls off | 0.000471 | n/a | full |
 | cost per query, controls on | 0.000292 | n/a | full |
 | cost reduction | 0.380042 | n/a | full |

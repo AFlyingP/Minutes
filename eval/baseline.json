@@ -1,6 +1,7 @@
 {
-  "git_commit": "d1994776c1eed8976c95ce00d32a78bb5a7dffaf",
+  "git_commit": "834e5f9f1145b23d735f41d35758b7410d20b966",
   "metrics": {
+    "agent_completion": 0.75,
     "answer_accuracy": 0.8958,
     "cost_per_query_usd": 0.000292,
     "decline_accuracy": 1.0,
@@ -9,5 +10,5 @@
     "recall_at_10": 0.9583,
     "segmentation_exact_rate": 1.0
   },
-  "written_utc": "2026-10-17T04:45:28Z"
+  "written_utc": "2026-10-17T23:14:42Z"
 }
