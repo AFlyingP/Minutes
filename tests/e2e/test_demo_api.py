@@ -91,3 +91,15 @@ def test_demo_step_7_decline(fixture_corpus: str) -> None:
     assert answer["decline_reason"] == "no_retrieval"
     assert answer["decline_message"] == "I can't answer that from the indexed records."
     assert answer["sentences"] == []
+
+
+def test_demo_step_8_agent(fixture_corpus: str) -> None:
+    response = TestClient(create_app()).post(
+        "/api/agent",
+        json={"question": "Which sidewalk repair contract items passed, and by what vote?"},
+    )
+    assert response.status_code == 200
+    result = response.json()
+    assert result["status"] == "completed"
+    assert len(result["steps"]) == 2
+    assert "RESOLUTION 2024-07 passed 4-1" in result["answer"]

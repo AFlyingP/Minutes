@@ -13,10 +13,11 @@ import psycopg
 from psycopg.rows import TupleRow
 
 from minutes import corpus, db
+from minutes.agent.agent import run_agent
 from minutes.answer.pipeline import answer as answer_question
 from minutes.config import Corpus, corpus_database_url, get_settings
 from minutes.errors import ConfigError, LLMOutputError, LLMTransportError, ValidationError
-from minutes.evals.grader import grade_answer, grade_support
+from minutes.evals.grader import grade_answer, grade_exact, grade_free_text, grade_support
 from minutes.evals.metrics import (
     mean_or_none,
     percentile,
@@ -30,6 +31,7 @@ from minutes.ingest import pipeline, quality
 from minutes.labels import export, store
 from minutes.labels.schema import (
     AgendaCount,
+    AgentTask,
     ExtractionCase,
     Label,
     LabelType,
@@ -585,11 +587,49 @@ def _cost(context: EvalContext) -> Result:
     return cost
 
 
+def _agent(context: EvalContext) -> Result:
+    tasks = [
+        (label, cast(AgentTask, parse_payload(label.type, label.payload)))
+        for label in context.labels
+        if label.type == "agent_task"
+    ]
+    completion: list[float | None] = []
+    document_recall: list[float | None] = []
+    mean_steps: list[float | None] = []
+    for sample_index in range(5):
+        completed = 0
+        recall_sum = 0.0
+        steps_sum = 0
+        for _, task in tasks:
+            result = run_agent(context.conn, task.question, sample_index=sample_index)
+            answer_text = result.answer
+            if result.status == "completed":
+                correct = (
+                    grade_free_text(task.question, task.answer, answer_text, sample_index)
+                    if task.answer_type == "free_text"
+                    else grade_exact(task.answer_type, task.answer, answer_text)
+                )
+                completed += bool(correct)
+            cited = {str(citation["document_id"]) for citation in result.citations}
+            gold = set(task.document_ids)
+            recall_sum += len(cited & gold) / len(gold) if gold else 0.0
+            steps_sum += len(result.steps)
+        completion.append(completed / len(tasks) if tasks else None)
+        document_recall.append(recall_sum / len(tasks) if tasks else None)
+        mean_steps.append(steps_sum / len(tasks) if tasks else None)
+    return {
+        "completion": summarize_runs(completion),
+        "doc_recall": summarize_runs(document_recall),
+        "mean_steps": summarize_runs(mean_steps),
+    }
+
+
 SECTIONS: dict[str, Callable[[EvalContext], Result]] = {
     "retrieval": _retrieval,
     "segmentation": _segmentation,
     "extraction": _extraction,
     "answers": _answers,
+    "agent": _agent,
     "cost": _cost,
 }
 
@@ -640,12 +680,12 @@ def run_suite(
 ) -> dict[str, object]:
     """Run registered evaluation sections and merge their results into a JSON file."""
     available = (
-        {"retrieval", "segmentation", "extraction", "answers", "cost"}
+        {"retrieval", "segmentation", "extraction", "answers", "agent", "cost"}
         if suite == "gate"
         else set(SECTIONS)
     )
     if only is None and suite == "gate":
-        names = ["retrieval", "segmentation", "extraction", "answers", "cost"]
+        names = ["retrieval", "segmentation", "extraction", "answers", "agent", "cost"]
     elif only is None:
         names = list(SECTIONS)
     else:

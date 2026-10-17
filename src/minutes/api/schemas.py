@@ -1,7 +1,7 @@
 from datetime import date
 from typing import Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from minutes.ingest.layout import Box
 from minutes.labels.schema import Label, LabelType
@@ -113,6 +113,34 @@ class AskOut(BaseModel):
     latency_ms: int
     cached: bool
     dropped_sentences: int
+
+
+class AgentIn(BaseModel):
+    question: str = Field(min_length=1, max_length=500)
+
+
+class AgentStepOut(BaseModel):
+    index: int
+    tool: str
+    arguments: dict[str, object]
+    result_summary: str
+    error: str | None
+
+
+class AgentCitationOut(BaseModel):
+    document_id: str
+    unit_index: int
+    label: str
+
+
+class AgentOut(BaseModel):
+    status: Literal["completed", "limit_exceeded", "error"]
+    answer: str
+    citations: list[AgentCitationOut]
+    steps: list[AgentStepOut]
+    cost_usd: float
+    limit: Literal["steps", "cost", "time"] | None
+    max_steps: Literal[8]
 
 
 class DocumentSummaryOut(BaseModel):

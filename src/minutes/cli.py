@@ -15,6 +15,7 @@ from pydantic import ValidationError as PayloadError
 from typer.core import TyperGroup
 
 from minutes import corpus, db, probe, queue, worker
+from minutes.agent.agent import run_agent
 from minutes.answer.pipeline import answer
 from minutes.api.app import create_app
 from minutes.api.schemas import Chunker, Pipeline, SearchMode
@@ -837,6 +838,20 @@ def ask_command(
     for citation in result.citations:
         label = span_label(citation.unit_kind, citation.unit_index, citation.start_ms)
         typer.echo(f"[{citation.number}] {citation.document_id} {label}")
+
+
+@app.command("agent")
+def agent_command(question: str, corpus: CorpusOption = None) -> None:
+    """Research a question with bounded search and read-only SQL steps."""
+    used = use_corpus(corpus)
+    if used != "fixture":
+        store.require_frozen(LABELS_DIR)
+    with db.connect(corpus_database_url(used)) as conn:
+        result = run_agent(conn, question)
+    for step in result.steps:
+        typer.echo(f"step {step.index} {step.tool} {step.result_summary}")
+    typer.echo(f"status: {result.status}")
+    typer.echo(result.answer)
 
 
 @app.command("serve")

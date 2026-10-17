@@ -75,6 +75,31 @@ JUDGE_USER = """\
 JUDGE_SYSTEM = """\
 You check whether sentences are supported by source text. A sentence is supported when every factual claim in it is stated in its sources or follows directly from them, for example by counting listed names. Judge each sentence only against its own sources. Give one verdict per sentence, using the sentence numbers given. Reply with JSON only."""
 
+AGENT_SYSTEM = """\
+You research questions about city council records for the cities in the database. You work in steps. In each step you reply with one JSON action.
+
+Actions:
+- "search": full-text and semantic search over agendas, minutes, and meeting captions. Arguments: query (required), city, date_from, date_to, body (optional; use null to leave one out). Returns up to 5 passages with document_id and unit_index.
+- "sql": one read-only PostgreSQL SELECT statement over these views. It fails if it returns more than 200 rows or runs longer than 3 seconds, so use WHERE, GROUP BY, and LIMIT.
+  v_meetings(id, city_id, body, meeting_date, title)
+  v_documents(id, meeting_id, city_id, kind, unit_kind, unit_count, body, meeting_date)
+  v_units(document_id, unit_index, unit_kind, text, start_ms, end_ms, speaker)
+  v_items(id, document_id, meeting_id, kind, identifier, title, ordinal, start_unit, end_unit, linked_item_id)
+  v_facts(id, kind, document_id, meeting_id, city_id, body, meeting_date, item_id, unit_index, quote, data)
+  v_motions(id, document_id, meeting_id, city_id, body, meeting_date, unit_index, text, mover, seconder, outcome, quote)
+  v_votes(id, document_id, meeting_id, city_id, body, meeting_date, unit_index, subject_identifier, ayes, noes, abstain, absent, outcome, quote)
+  v_vote_members(vote_id, city_id, meeting_date, member, value)
+  v_ordinances(id, document_id, meeting_id, city_id, body, meeting_date, unit_index, identifier, legislation_type, title, status, quote)
+  v_amounts(id, document_id, meeting_id, city_id, body, meeting_date, unit_index, amount_usd, purpose, payee, quote)
+  v_statements(id, document_id, meeting_id, city_id, body, meeting_date, unit_index, speaker, role, summary, quote)
+- "final": give the answer. Include citations as document_id and unit_index pairs taken from earlier results.
+
+Rules:
+- You have at most 8 search or sql steps. Plan before you act and stop as soon as you can answer.
+- Base the answer only on results you received. If the records do not answer the question, say so in the final answer.
+- Set the fields of actions you are not using to null.
+Reply with JSON only."""
+
 GRADE_ANSWER_SYSTEM = """\
 You grade an answer to a question against a reference answer. The answer is correct when it states the same fact as the reference answer and does not contradict it. Extra detail is allowed. An answer that declines or says the information is not available is incorrect. Reply with JSON only."""
 
@@ -131,6 +156,59 @@ CORRECT_SCHEMA: dict[str, object] = {
     "type": "object",
     "properties": {"correct": {"type": "boolean"}},
     "required": ["correct"],
+    "additionalProperties": False,
+}
+
+AGENT_ACTION_SCHEMA: dict[str, object] = {
+    "type": "object",
+    "properties": {
+        "thought": {"type": "string"},
+        "action": {"type": "string", "enum": ["search", "sql", "final"]},
+        "search": {
+            "anyOf": [
+                {
+                    "type": "object",
+                    "properties": {
+                        "query": {"type": "string"},
+                        "city": {"type": ["string", "null"]},
+                        "date_from": {"type": ["string", "null"]},
+                        "date_to": {"type": ["string", "null"]},
+                        "body": {"type": ["string", "null"]},
+                    },
+                    "required": ["query", "city", "date_from", "date_to", "body"],
+                    "additionalProperties": False,
+                },
+                {"type": "null"},
+            ]
+        },
+        "sql": {"type": ["string", "null"]},
+        "final": {
+            "anyOf": [
+                {
+                    "type": "object",
+                    "properties": {
+                        "answer": {"type": "string"},
+                        "citations": {
+                            "type": "array",
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "document_id": {"type": "string"},
+                                    "unit_index": {"type": "integer"},
+                                },
+                                "required": ["document_id", "unit_index"],
+                                "additionalProperties": False,
+                            },
+                        },
+                    },
+                    "required": ["answer", "citations"],
+                    "additionalProperties": False,
+                },
+                {"type": "null"},
+            ]
+        },
+    },
+    "required": ["thought", "action", "search", "sql", "final"],
     "additionalProperties": False,
 }
 

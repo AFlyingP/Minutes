@@ -147,6 +147,71 @@ def _grade_correct(user: str) -> dict[str, object]:
     return {"correct": " ".join(reference.lower().split()) in " ".join(answer.lower().split())}
 
 
+def _agent(messages: list[dict[str, str]]) -> dict[str, object]:
+    question = messages[1]["content"]
+    observations: list[object] = []
+    for message in messages:
+        if message["content"].startswith("OBSERVATION "):
+            _, payload = message["content"].split(": ", 1)
+            observations.append(json.loads(payload))
+    if not observations:
+        return {
+            "thought": "search first",
+            "action": "search",
+            "search": {
+                "query": question,
+                "city": None,
+                "date_from": None,
+                "date_to": None,
+                "body": None,
+            },
+            "sql": None,
+            "final": None,
+        }
+    if len(observations) == 1:
+        return {
+            "thought": "check the recorded vote",
+            "action": "sql",
+            "search": None,
+            "sql": "SELECT subject_identifier, ayes, noes, outcome FROM v_votes "
+            "ORDER BY meeting_date, document_id, unit_index, id",
+            "final": None,
+        }
+    hits = observations[0] if isinstance(observations[0], list) else []
+    table = observations[1] if isinstance(observations[1], dict) else {}
+    columns = table.get("columns", [])
+    rows = table.get("rows", [])
+    positions = {name: index for index, name in enumerate(columns)}
+    text = " ".join(str(hit.get("text", "")) for hit in hits if isinstance(hit, dict))
+    answers = []
+    for row in rows:
+        if not isinstance(row, list) or not all(
+            name in positions for name in ("subject_identifier", "ayes", "noes", "outcome")
+        ):
+            continue
+        subject = row[positions["subject_identifier"]]
+        ayes = row[positions["ayes"]]
+        noes = row[positions["noes"]]
+        outcome = row[positions["outcome"]]
+        if subject and str(subject) in text and outcome == "passed":
+            answers.append(f"{subject} passed {ayes}-{noes}.")
+    citations = [
+        {"document_id": hit["document_id"], "unit_index": hit["unit_index"]}
+        for hit in hits[:3]
+        if isinstance(hit, dict) and "document_id" in hit and "unit_index" in hit
+    ]
+    return {
+        "thought": "answer from the retrieved records",
+        "action": "final",
+        "search": None,
+        "sql": None,
+        "final": {
+            "answer": " ".join(answers) if answers else "No matching votes found.",
+            "citations": citations,
+        },
+    }
+
+
 class StubClient:
     def chat(
         self,
@@ -200,6 +265,8 @@ class StubClient:
             user = messages[-1]["content"]
             if purpose == "synth":
                 parsed = _synth(user)
+            elif purpose == "agent":
+                parsed = _agent(messages)
             elif purpose in ("judge", "grade") and schema == SUPPORTED_SCHEMA:
                 parsed = _grade_support(user)
             elif purpose == "grade" and schema == CORRECT_SCHEMA:
