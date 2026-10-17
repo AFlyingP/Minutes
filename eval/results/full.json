@@ -56,8 +56,8 @@
         "runs": 5
       },
       "latency_ms": {
-        "p50": 4513.0,
-        "p95": 7218.0
+        "p50": 4282.0,
+        "p95": 6745.0
       }
     }
   },
@@ -82,6 +82,17 @@
       }
     },
     "segments": 31695
+  },
+  "cost": {
+    "controls_off": {
+      "cost_per_query_usd": 0.000471,
+      "queries": 90
+    },
+    "controls_on": {
+      "cost_per_query_usd": 0.000292,
+      "queries": 90
+    },
+    "reduction": 0.380042
   },
   "extraction": {
     "overall": {
@@ -138,8 +149,8 @@
     },
     "verifier_reject_rate": 0.0672
   },
-  "generated_utc": "2026-10-17T02:27:22Z",
-  "git_commit": "3ba4f37407774da46717aac0774464ec1380b9ae",
+  "generated_utc": "2026-10-17T04:37:13Z",
+  "git_commit": "d1994776c1eed8976c95ce00d32a78bb5a7dffaf",
   "grader": {
     "answer": {
       "accuracy": 1.0,

@@ -20,11 +20,11 @@
 | faithfulness final | 0.9762 | 5 (0.9756 / 0.9762 / 1) | full |
 | decline accuracy final | 1 | 5 (1 / 1 / 1) | full |
 | agent task completion | n/a | n/a | full |
-| cost per query, controls off | n/a | n/a | full |
-| cost per query, controls on | n/a | n/a | full |
-| cost reduction | n/a | n/a | full |
-| answer latency p50 | 4513 | n/a | full |
-| answer latency p95 | 7218 | n/a | full |
+| cost per query, controls off | 0.000471 | n/a | full |
+| cost per query, controls on | 0.000292 | n/a | full |
+| cost reduction | 0.380042 | n/a | full |
+| answer latency p50 | 4282 | n/a | full |
+| answer latency p95 | 6745 | n/a | full |
 | parse quality lincoln | 0.9309 | n/a | lincoln |
 | parse quality seattle | 0.978 | n/a | seattle |
 | pgvector ANN recall@10 | n/a | n/a | full |

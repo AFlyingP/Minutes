@@ -12,8 +12,8 @@
     "rerank.jsonl.gz": "1ccc5faa8a5b9034f77a1619f57b7fc824b2b240fc0fdbb281c43ac8ce05c8dc",
     "snapshot.jsonl.gz": "8e1ec205eebe5de24764e855de466b6a0cc3f43c7bd7aab3b3f1a18652e76708"
   },
-  "git_commit": "3ba4f37407774da46717aac0774464ec1380b9ae",
-  "recorded_utc": "2026-10-17T03:23:03Z",
+  "git_commit": "d1994776c1eed8976c95ce00d32a78bb5a7dffaf",
+  "recorded_utc": "2026-10-17T04:43:48Z",
   "stage_versions": {
     "chunk": 2,
     "embed": 1,
