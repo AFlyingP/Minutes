@@ -60,6 +60,12 @@ def test_migrate_creates_all_tables_and_views(conn: psycopg.Connection[TupleRow]
     ).fetchall()
     assert {row[0] for row in tables} == TABLES
     assert {row[0] for row in views} == VIEWS
+    version = conn.execute(
+        "SELECT version FROM schema_migrations ORDER BY version DESC LIMIT 1"
+    ).fetchone()
+    role = conn.execute("SELECT rolname FROM pg_roles WHERE rolname = 'minutes_ro'").fetchone()
+    assert version == ("0002",)
+    assert role == ("minutes_ro",)
 
 
 def test_migrate_is_idempotent(scratch_url: str) -> None:
@@ -67,18 +73,28 @@ def test_migrate_is_idempotent(scratch_url: str) -> None:
 
 
 def test_rollback_then_migrate_restores_schema(scratch_url: str) -> None:
-    assert db.rollback(scratch_url, steps=1) == ["0001"]
+    assert db.rollback(scratch_url, steps=1) == ["0002"]
     with db.connect(scratch_url) as conn:
         units = conn.execute("SELECT to_regclass('public.units')").fetchone()
-    assert units == (None,)
-    assert db.migrate(scratch_url) == ["0001"]
+        grants = conn.execute(
+            "SELECT has_table_privilege('minutes_ro', 'v_votes', 'SELECT')"
+        ).fetchone()
+        role = conn.execute("SELECT rolname FROM pg_roles WHERE rolname = 'minutes_ro'").fetchone()
+    assert units != (None,)
+    assert grants == (False,)
+    assert role == ("minutes_ro",)
+    assert db.migrate(scratch_url) == ["0002"]
+    with psycopg.connect(scratch_url.replace("minutes_migrations_test", "minutes_test")) as other:
+        assert other.execute(
+            "SELECT has_table_privilege('minutes_ro', 'v_votes', 'SELECT')"
+        ).fetchone() == (True,)
 
 
 def test_rollback_without_a_down_file_is_a_migration_error(
     scratch_url: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(db, "MIGRATIONS_DIR", tmp_path)
-    with pytest.raises(MigrationError, match="no down file for 0001"):
+    with pytest.raises(MigrationError, match="no down file for 0002"):
         db.rollback(scratch_url)
 
 
@@ -132,9 +148,9 @@ def test_failed_migration_rolls_back_only_that_file(
                 db.reset(scratch_url)
         with psycopg.connect(scratch_url) as conn:
             versions = conn.execute("SELECT version FROM schema_migrations").fetchall()
-            second = conn.execute("SELECT to_regclass('public.second')").fetchone()
+            second_table = conn.execute("SELECT to_regclass('public.second')").fetchone()
         assert versions == [("0001",)]
-        assert second == (None,)
+        assert second_table == (None,)
     finally:
         # the tests below need the real schema back
         db.reset(scratch_url)
@@ -145,8 +161,8 @@ def test_db_commands_print_what_they_did(scratch_url: str, monkeypatch: pytest.M
     get_settings.cache_clear()
     runner = CliRunner()
     assert runner.invoke(app, ["db", "migrate"]).output == "up to date\n"
-    assert runner.invoke(app, ["db", "rollback"]).output == "rolled back 0001\n"
-    assert runner.invoke(app, ["db", "migrate"]).output == "applied 0001\n"
+    assert runner.invoke(app, ["db", "rollback"]).output == "rolled back 0002\n"
+    assert runner.invoke(app, ["db", "migrate"]).output == "applied 0002\n"
     reset = runner.invoke(app, ["db", "reset", "--yes"])
     monkeypatch.undo()
     get_settings.cache_clear()

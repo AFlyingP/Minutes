@@ -1,0 +1,2 @@
+REVOKE ALL ON ALL TABLES IN SCHEMA public FROM minutes_ro;
+REVOKE ALL ON SCHEMA public FROM minutes_ro;
