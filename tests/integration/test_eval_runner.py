@@ -124,6 +124,19 @@ def test_unknown_section_is_rejected(tmp_path: Path, fixture_corpus: str) -> Non
         )
 
 
+def test_render_table_reads_vector_bench_file_only_when_results_lack_it(tmp_path: Path) -> None:
+    bench = tmp_path / "vector_bench.json"
+    engine = {"ann_recall_at_10": 0.8123, "p50_ms": 1.5, "p95_ms": 2.5}
+    bench.write_text(json.dumps({"pgvector": engine, "qdrant": engine}), encoding="utf-8")
+    assert "0.8123" in render_table({"suite": "full"}, bench)
+    assert "0.8123" not in render_table({"suite": "full"})
+    stored: dict[str, object] = {
+        "suite": "full",
+        "vector_bench": {"pgvector": {"ann_recall_at_10": 0.7}},
+    }
+    assert "0.8123" not in render_table(stored, bench)
+
+
 def test_render_table_numbers_come_from_results(eval_file: EvalFile) -> None:
     table = render_table(eval_file.results)
     paths = {

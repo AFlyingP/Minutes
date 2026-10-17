@@ -1,4 +1,6 @@
+import json
 from collections.abc import Sequence
+from pathlib import Path
 
 
 def _get(results: dict[str, object], path: Sequence[str]) -> object:
@@ -44,8 +46,15 @@ def _row(
     return f"| {name} | {_number(value)} | {runs} | {dataset} |"
 
 
-def render_table(results: dict[str, object]) -> str:
+def render_table(results: dict[str, object], vector_bench_path: Path | None = None) -> str:
     """Render the evaluation result fields in the verification table order."""
+    if "vector_bench" not in results and vector_bench_path is not None:
+        try:
+            vector_bench = json.loads(vector_bench_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            vector_bench = None
+        if isinstance(vector_bench, dict):
+            results = {**results, "vector_bench": vector_bench}
     dataset = str(results.get("suite", "n/a"))
     lines = [
         "| Metric | Value | Runs (min / median / max) | Dataset |",

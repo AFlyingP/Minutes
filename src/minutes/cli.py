@@ -38,6 +38,7 @@ from minutes.labels import export, store
 from minutes.labels.rules import PRODUCTION_RULES, check
 from minutes.labels.schema import LabelIn, LabelType
 from minutes.log import bind_correlation_id, configure_logging, get_logger, new_correlation_id
+from minutes.models import get_embedder
 from minutes.retrieval.search import Filters, city_names, hit_heading, search, span_label
 from minutes.tracing import configure_tracing
 
@@ -90,6 +91,7 @@ app.add_typer(extract_app, name="extract")
 
 LABELS_DIR = ROOT / "eval" / "labels"
 RESULTS_FILE = ROOT / "eval" / "results" / "full.json"
+VECTOR_BENCH_RESULTS_FILE = ROOT / "eval" / "results" / "vector_bench.json"
 LABEL_RULES = PRODUCTION_RULES
 GATE_RECORDING_DIR = ROOT / "eval" / "gate"
 GATE_BASELINE_FILE = ROOT / "eval" / "baseline.json"
@@ -189,8 +191,54 @@ def eval_report_command() -> None:
         raise NotFoundError("missing eval/results/full.json")
     results = cast(dict[str, object], json.loads(results_path.read_text(encoding="utf-8")))
     report_path = ROOT / "eval" / "results" / "full.md"
-    report_path.write_text(eval_report.render_table(results), encoding="utf-8", newline="\n")
+    table = eval_report.render_table(results, VECTOR_BENCH_RESULTS_FILE)
+    report_path.write_text(table, encoding="utf-8", newline="\n")
     typer.echo(f"updated {report_path.as_posix()}")
+
+
+@eval_app.command("bench-vector")
+def eval_bench_vector() -> None:
+    """Compare pgvector and Qdrant on the frozen full-corpus benchmark."""
+    if use_corpus(None) != "full":
+        raise ConfigError("eval bench-vector requires MINUTES_CORPUS=full")
+    store.require_frozen(LABELS_DIR)
+    questions = [
+        str(label.payload["question"])
+        for label in eval_runner.load_labels(LABELS_DIR)
+        if label.type == "question"
+    ]
+    if len(questions) != 60:
+        raise ConfigError(f"expected 60 frozen question labels, got {len(questions)}")
+
+    # Keep the Qdrant SDK out of CLI startup; load it only when this command runs.
+    from minutes.retrieval import qdrant_bench
+
+    try:
+        client = qdrant_bench.QdrantClient(url="http://127.0.0.1:6333")
+        client.get_collections()
+    except Exception as err:
+        typer.echo("error: qdrant is not reachable on 127.0.0.1:6333", err=True)
+        raise typer.Exit(1) from err
+    try:
+        with db.connect(corpus_database_url("full")) as conn:
+            results = qdrant_bench.run_benchmark(conn, client, questions, get_embedder())
+    finally:
+        client.close()
+
+    VECTOR_BENCH_RESULTS_FILE.parent.mkdir(parents=True, exist_ok=True)
+    VECTOR_BENCH_RESULTS_FILE.write_text(
+        json.dumps(results, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+        newline="\n",
+    )
+    engines = {name: results[name] for name in ("pgvector", "qdrant")}
+    eval_runner.write_results(RESULTS_FILE, {"vector_bench": engines})
+    for name in ("pgvector", "qdrant"):
+        metrics = cast(dict[str, float], engines[name])
+        typer.echo(
+            f"{name} ann_recall_at_10={metrics['ann_recall_at_10']:.4f} "
+            f"p50_ms={metrics['p50_ms']:.1f} p95_ms={metrics['p95_ms']:.1f}"
+        )
 
 
 @app.callback()
