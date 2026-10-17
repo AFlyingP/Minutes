@@ -29,6 +29,36 @@
         "p50": 3745.0,
         "p95": 5506.0
       }
+    },
+    "final": {
+      "answer_accuracy": {
+        "max": 0.7917,
+        "median": 0.7708,
+        "min": 0.7708,
+        "runs": 5
+      },
+      "decline_accuracy": {
+        "max": 1.0,
+        "median": 1.0,
+        "min": 1.0,
+        "runs": 5
+      },
+      "faithfulness": {
+        "max": 1.0,
+        "median": 0.9762,
+        "min": 0.9756,
+        "runs": 5
+      },
+      "false_decline_rate": {
+        "max": 0.1875,
+        "median": 0.1458,
+        "min": 0.125,
+        "runs": 5
+      },
+      "latency_ms": {
+        "p50": 4513.0,
+        "p95": 7218.0
+      }
     }
   },
   "corpus": {
@@ -108,8 +138,8 @@
     },
     "verifier_reject_rate": 0.0672
   },
-  "generated_utc": "2026-10-16T22:36:37Z",
-  "git_commit": "4001e71534a06b512e24bdc30b6ac89da8aee456",
+  "generated_utc": "2026-10-17T02:27:22Z",
+  "git_commit": "3ba4f37407774da46717aac0774464ec1380b9ae",
   "grader": {
     "answer": {
       "accuracy": 1.0,
