@@ -1,7 +1,9 @@
+from __future__ import annotations
+
 import time
 from dataclasses import dataclass
 from datetime import date
-from typing import Any, Literal, cast
+from typing import Any, Literal, NotRequired, TypedDict, cast
 
 import psycopg
 from psycopg.rows import TupleRow
@@ -27,6 +29,27 @@ from minutes.retrieval.search import Filters, Hit, Span, city_names, search, spa
 K = 8
 MIN_RERANK_SCORE = 0.20
 MAX_DROPPED_SHARE = 0.5
+
+
+class AnswerState(TypedDict):
+    question: str
+    filters: Filters
+    controls: bool
+    sample_index: int
+    budget: Budget | None
+    hits: list[Hit]
+    spans: list[SourceSpan]
+    model: str | None
+    draft: dict[str, Any] | None
+    sentences: list[dict[str, Any]]
+    dropped: int
+    result: AnswerResult | None
+    started: NotRequired[float]
+    sources: NotRequired[list[tuple[Hit, Span]]]
+    span_metadata: NotRequired[dict[tuple[str, int], tuple[str, int | None]]]
+    calls: NotRequired[list[ChatResult]]
+    synth_result: NotRequired[ChatResult]
+    conn: NotRequired[psycopg.Connection[TupleRow]]
 
 
 def get_client() -> llm.LLMClient:
@@ -137,21 +160,59 @@ def answer(
             cache.put(conn, response_key, result)
         return result
 
+    state: AnswerState = {
+        "question": question,
+        "filters": filters,
+        "controls": controls,
+        "sample_index": sample_index,
+        "budget": None,
+        "hits": [],
+        "spans": [],
+        "model": None,
+        "draft": None,
+        "sentences": [],
+        "dropped": 0,
+        "result": None,
+        "started": started,
+        "calls": [],
+    }
+    retrieve_step(conn, state, pipeline=pipeline)
+    if state["result"] is None:
+        synthesize_step(state, pipeline=pipeline)
+    if state["result"] is None:
+        verify_step(state, pipeline=pipeline)
+    if state["result"] is None:
+        finalize_step(state, pipeline=pipeline)
+    assert state["result"] is not None
+    return finish(state["result"])
+
+
+def retrieve_step(
+    conn: psycopg.Connection[TupleRow],
+    state: AnswerState,
+    *,
+    pipeline: Literal["baseline", "final", "langgraph"] = "final",
+) -> AnswerState:
+    started = state.get("started", time.perf_counter())
+    is_final = pipeline != "baseline"
     hits = search(
         conn,
-        question,
-        filters,
+        state["question"],
+        state["filters"],
         mode="hybrid_rerank" if is_final else "vector",
         chunker="item" if is_final else "fixed",
         k=K,
     )
+    state["hits"] = hits
     if not hits or (is_final and hits[0].score < MIN_RERANK_SCORE):
-        return finish(_declined("no_retrieval", pipeline, started))
+        state["result"] = _declined("no_retrieval", pipeline, started)
+        return state
     names = city_names(conn)
     sources = [(hit, span) for hit in hits for span in hit.spans]
+    state["sources"] = sources
     span_documents = [span.document_id for _, span in sources]
     span_units = [span.unit_index for _, span in sources]
-    span_metadata = {
+    state["span_metadata"] = {
         (document_id, unit_index): (doc_kind, start_ms)
         for document_id, unit_index, doc_kind, start_ms in conn.execute(
             "SELECT refs.document_id, refs.unit_index, d.kind, u.start_ms "
@@ -161,7 +222,7 @@ def answer(
             (span_documents, span_units),
         ).fetchall()
     }
-    spans = [
+    state["spans"] = [
         SourceSpan(
             number,
             names[hit.city_id],
@@ -173,117 +234,198 @@ def answer(
         )
         for number, (hit, span) in enumerate(sources, start=1)
     ]
-    calls: list[ChatResult] = []
-    budget = Budget(get_settings().query_budget_usd) if is_final else None
-    models = load_models()
-    model = None
+    state["budget"] = Budget(get_settings().query_budget_usd) if is_final else None
     if is_final:
-        model = (
+        models = load_models()
+        state["model"] = (
             models.cheap
-            if controls and is_easy_question(question, hits[0].score)
+            if state["controls"] and is_easy_question(state["question"], hits[0].score)
             else models.strong
         )
+    return state
+
+
+def synthesize_step(
+    state: AnswerState,
+    *,
+    pipeline: Literal["baseline", "final", "langgraph"] = "final",
+    chat_model: Any | None = None,
+) -> AnswerState:
+    started = state.get("started", time.perf_counter())
+    calls = state.setdefault("calls", [])
     try:
-        result = get_client().chat(
-            purpose="synth",
-            messages=[
-                {"role": "system", "content": SYNTH_SYSTEM},
-                {"role": "user", "content": synth_user(question, spans)},
-            ],
-            schema=SYNTH_SCHEMA,
-            schema_name="synth",
-            model=model,
-            sample_index=sample_index,
-            budget=budget,
-        )
+        if chat_model is None:
+            result = get_client().chat(
+                purpose="synth",
+                messages=[
+                    {"role": "system", "content": SYNTH_SYSTEM},
+                    {"role": "user", "content": synth_user(state["question"], state["spans"])},
+                ],
+                schema=SYNTH_SCHEMA,
+                schema_name="synth",
+                model=state["model"],
+                sample_index=state["sample_index"],
+                budget=state["budget"],
+            )
+        else:
+            from langchain_core.messages import HumanMessage, SystemMessage
+
+            response = chat_model.invoke(
+                [
+                    SystemMessage(content=SYNTH_SYSTEM),
+                    HumanMessage(content=synth_user(state["question"], state["spans"])),
+                ]
+            )
+            result = _chat_result_from_message(response)
         calls.append(result)
     except BudgetExceeded:
-        return finish(_declined("budget_exceeded", pipeline, started, results=calls))
+        state["result"] = _declined("budget_exceeded", pipeline, started, results=calls)
+        return state
     except LLMOutputError:
-        return finish(_declined("model_error", pipeline, started, results=calls))
+        state["result"] = _declined("model_error", pipeline, started, results=calls)
+        return state
+    state["synth_result"] = result
     if result.parsed is None:
-        return finish(_declined("model_error", pipeline, started, results=calls))
+        state["result"] = _declined("model_error", pipeline, started, results=calls)
+        return state
     output: dict[str, Any] = result.parsed
+    state["draft"] = output
     if output["decline"]:
-        return finish(_declined("model_declined", pipeline, started, results=calls))
-    valid = [
-        s
-        for s in output["sentences"]
-        if s["citations"] and all(1 <= n <= len(sources) for n in s["citations"])
+        state["result"] = _declined("model_declined", pipeline, started, results=calls)
+        return state
+    sources = state["sources"]
+    state["sentences"] = [
+        sentence
+        for sentence in output["sentences"]
+        if sentence["citations"]
+        and all(1 <= number <= len(sources) for number in sentence["citations"])
     ]
-    dropped = len(output["sentences"]) - len(valid)
-    kept = valid
-    if is_final and valid:
-        judge_inputs = [
-            (sentence["text"], [sources[number - 1][1].text for number in sentence["citations"]])
-            for sentence in valid
-        ]
+    state["dropped"] = len(output["sentences"]) - len(state["sentences"])
+    return state
 
-        def judge(sentences: list[tuple[str, list[str]]]) -> list[bool]:
+
+def _chat_result_from_message(message: Any) -> ChatResult:
+    metadata = message.response_metadata
+    return ChatResult(
+        text=message.content,
+        parsed=metadata["parsed"],
+        model=metadata["model"],
+        prompt_tokens=0,
+        completion_tokens=0,
+        cost_usd=metadata["cost_usd"],
+        latency_ms=metadata["latency_ms"],
+        cached=metadata["cached"],
+    )
+
+
+def verify_step(
+    state: AnswerState,
+    *,
+    pipeline: Literal["baseline", "final", "langgraph"] = "final",
+    chat_model: Any | None = None,
+) -> AnswerState:
+    if pipeline == "baseline" or not state["sentences"]:
+        return state
+    started = state.get("started", time.perf_counter())
+    calls = state.setdefault("calls", [])
+    sources = state["sources"]
+    sentences = state["sentences"]
+    judge_inputs = [
+        (sentence["text"], [sources[number - 1][1].text for number in sentence["citations"]])
+        for sentence in sentences
+    ]
+
+    def judge(inputs: list[tuple[str, list[str]]]) -> list[bool]:
+        if chat_model is None:
             judged = get_client().chat(
                 purpose="judge",
                 messages=[
                     {"role": "system", "content": JUDGE_SYSTEM},
-                    {"role": "user", "content": judge_user(sentences)},
+                    {"role": "user", "content": judge_user(inputs)},
                 ],
                 schema=SUPPORTED_SCHEMA,
                 schema_name="supported",
-                sample_index=sample_index,
-                budget=budget,
+                sample_index=state["sample_index"],
+                budget=state["budget"],
             )
-            calls.append(judged)
-            verdicts = [False] * len(sentences)
-            verdicts_raw = cast(list[dict[str, Any]], (judged.parsed or {}).get("verdicts", []))
-            for verdict in verdicts_raw:
-                number = verdict["sentence"]
-                if 1 <= number <= len(verdicts):
-                    verdicts[number - 1] = verdict["supported"]
-            return verdicts
+        else:
+            from langchain_core.messages import HumanMessage, SystemMessage
 
-        try:
-            supported = check_answer(judge_inputs, judge)
-        except BudgetExceeded:
-            return finish(_declined("budget_exceeded", pipeline, started, dropped, calls))
-        except LLMOutputError:
-            return finish(_declined("model_error", pipeline, started, dropped, calls))
-        kept = [
-            sentence
-            for sentence, is_supported in zip(valid, supported, strict=True)
-            if is_supported
-        ]
-        dropped += len(valid) - len(kept)
-        if not kept or dropped / len(output["sentences"]) > MAX_DROPPED_SHARE:
-            return finish(_declined("unsupported", pipeline, started, dropped, calls))
+            response = chat_model.invoke(
+                [SystemMessage(content=JUDGE_SYSTEM), HumanMessage(content=judge_user(inputs))]
+            )
+            judged = _chat_result_from_message(response)
+        calls.append(judged)
+        verdicts = [False] * len(inputs)
+        verdicts_raw = cast(list[dict[str, Any]], (judged.parsed or {}).get("verdicts", []))
+        for verdict in verdicts_raw:
+            number = verdict["sentence"]
+            if 1 <= number <= len(verdicts):
+                verdicts[number - 1] = verdict["supported"]
+        return verdicts
+
+    try:
+        supported = check_answer(judge_inputs, judge)
+    except BudgetExceeded:
+        state["result"] = _declined("budget_exceeded", pipeline, started, state["dropped"], calls)
+        return state
+    except LLMOutputError:
+        state["result"] = _declined("model_error", pipeline, started, state["dropped"], calls)
+        return state
+    kept = [
+        sentence
+        for sentence, is_supported in zip(sentences, supported, strict=True)
+        if is_supported
+    ]
+    state["dropped"] += len(sentences) - len(kept)
+    state["sentences"] = kept
+    draft = state["draft"]
+    assert draft is not None
+    if not kept or state["dropped"] / len(draft["sentences"]) > MAX_DROPPED_SHARE:
+        state["result"] = _declined("unsupported", pipeline, started, state["dropped"], calls)
+    return state
+
+
+def finalize_step(
+    state: AnswerState,
+    *,
+    pipeline: Literal["baseline", "final", "langgraph"] = "final",
+) -> AnswerState:
+    if state["result"] is not None:
+        return state
+    started = state.get("started", time.perf_counter())
+    calls = state.setdefault("calls", [])
+    kept = state["sentences"]
     if not kept:
-        return finish(_declined("unsupported", pipeline, started, dropped, calls))
-    # sources are renumbered in the order the answer first uses them
+        state["result"] = _declined("unsupported", pipeline, started, state["dropped"], calls)
+        return state
     numbers: dict[int, int] = {}
     for sentence in kept:
         for cited in sentence["citations"]:
             numbers.setdefault(cited, len(numbers) + 1)
-    return finish(
-        AnswerResult(
-            declined=False,
-            decline_reason=None,
-            sentences=[
-                AnswerSentence(s["text"], [numbers[cited] for cited in s["citations"]])
-                for s in kept
-            ],
-            citations=[
-                _citation(
-                    new,
-                    *sources[old - 1],
-                    *span_metadata[
-                        (sources[old - 1][1].document_id, sources[old - 1][1].unit_index)
-                    ],
-                )
-                for old, new in numbers.items()
-            ],
-            pipeline=pipeline,
-            model=result.model,
-            cost_usd=sum(call.cost_usd for call in calls),
-            latency_ms=_latency_ms(started, calls),
-            cached=False,
-            dropped_sentences=dropped,
-        )
+    sources = state["sources"]
+    metadata = state["span_metadata"]
+    result = state["synth_result"]
+    state["result"] = AnswerResult(
+        declined=False,
+        decline_reason=None,
+        sentences=[
+            AnswerSentence(sentence["text"], [numbers[cited] for cited in sentence["citations"]])
+            for sentence in kept
+        ],
+        citations=[
+            _citation(
+                new,
+                *sources[old - 1],
+                *metadata[(sources[old - 1][1].document_id, sources[old - 1][1].unit_index)],
+            )
+            for old, new in numbers.items()
+        ],
+        pipeline=pipeline,
+        model=result.model if result else None,
+        cost_usd=sum(call.cost_usd for call in calls),
+        latency_ms=_latency_ms(started, calls),
+        cached=False,
+        dropped_sentences=state["dropped"],
     )
+    return state
