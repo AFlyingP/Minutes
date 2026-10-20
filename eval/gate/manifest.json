@@ -8,12 +8,12 @@
   },
   "files": {
     "embeddings.npz": "8210968c7c834136bd4c15ad67016e13db9d365bcadea68b4897d11139974b3a",
-    "llm.jsonl.gz": "79f62cae32cec86ba6bb8ef7bdde0acdf093f1c1974d591f7197c167802837b4",
+    "llm.jsonl.gz": "42e2a060359a18f81fed90cbe45c409ce4b38290b41f1367c6bb5c89726c7a63",
     "rerank.jsonl.gz": "af9cf0d674d0967bc506e53d2b581247483720aa61cd874624ae95d0e92250e7",
     "snapshot.jsonl.gz": "8e1ec205eebe5de24764e855de466b6a0cc3f43c7bd7aab3b3f1a18652e76708"
   },
-  "git_commit": "834e5f9f1145b23d735f41d35758b7410d20b966",
-  "recorded_utc": "2026-10-17T23:13:27Z",
+  "git_commit": "e425db3801873ace43fc2b414030a9eb7827d858",
+  "recorded_utc": "2026-10-20T20:34:52Z",
   "stage_versions": {
     "chunk": 2,
     "embed": 1,

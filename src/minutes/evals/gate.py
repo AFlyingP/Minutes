@@ -506,6 +506,7 @@ def record(
                         pipeline.run_stage(conn, stage, document_id, "fixture")
                         if stage == "chunk":
                             _drop_fixed_chunks(conn, document_id)
+            conn.execute("ANALYZE")
         with _recording(recorder):
             runner.run_suite("gate", controls=True, labels_dir=labels_dir, out_path=results_path)
     recorder.write(out_dir)
@@ -581,6 +582,8 @@ def run_gate(
                         pipeline.run_stage(conn, stage, document_id, "fixture")
                         if stage == "chunk":
                             _drop_fixed_chunks(conn, document_id)
+                # Fresh statistics fix the query plans, so tied rows in tool output keep one order.
+                conn.execute("ANALYZE")
             results_path.unlink(missing_ok=True)
             results = runner.run_suite(
                 "gate", controls=True, labels_dir=labels_dir, out_path=results_path
