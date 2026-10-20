@@ -185,8 +185,10 @@ def eval_gate_command() -> None:
 
 
 @eval_app.command("report")
-def eval_report_command() -> None:
-    """Write the Markdown table from the full evaluation results file."""
+def eval_report_command(
+    readme: Annotated[Path | None, typer.Option("--readme")] = None,
+) -> None:
+    """Write the results table, the resume bullets, and the README results block."""
     results_path = RESULTS_FILE
     if not results_path.is_file():
         raise NotFoundError("missing eval/results/full.json")
@@ -195,6 +197,18 @@ def eval_report_command() -> None:
     table = eval_report.render_table(results, VECTOR_BENCH_RESULTS_FILE)
     report_path.write_text(table, encoding="utf-8", newline="\n")
     typer.echo(f"updated {report_path.as_posix()}")
+    answerable = sum(
+        1
+        for label in eval_runner.load_labels(LABELS_DIR)
+        if label.type == "question" and label.payload.get("answerable") is True
+    )
+    bullets_path = ROOT / "eval" / "results" / "resume_bullets.md"
+    bullets = eval_report.resume_bullets(results, answerable)
+    bullets_path.write_text(bullets, encoding="utf-8", newline="\n")
+    typer.echo(f"updated {bullets_path.as_posix()}")
+    if readme is not None:
+        eval_report.update_readme(readme, table)
+        typer.echo(f"updated {readme.as_posix()}")
 
 
 @eval_app.command("bench-vector")

@@ -1,6 +1,13 @@
 import json
 from collections.abc import Sequence
 from pathlib import Path
+from typing import cast
+
+from minutes.errors import ValidationError
+
+RESULTS_START = "<!-- results:start -->"
+RESULTS_END = "<!-- results:end -->"
+LABEL_TYPES = ("question", "agenda_count", "extraction", "agent_task")
 
 
 def _get(results: dict[str, object], path: Sequence[str]) -> object:
@@ -155,15 +162,75 @@ def render_table(results: dict[str, object], vector_bench_path: Path | None = No
         ("Qdrant ANN p95", ("vector_bench", "qdrant", "p95_ms")),
         ("answer grader agreement", ("grader", "answer", "accuracy")),
         ("support grader agreement", ("grader", "support", "accuracy")),
-        ("labels written by an automated pass", ("labels", "authors", "agent")),
-        ("labels written by a human", ("labels", "authors", "human")),
     ):
         lines.append(_row(results, name, path, dataset))
-    labels = _get(results, ("labels",))
-    reviewed = None
-    if isinstance(labels, dict):
-        reviewed_counts = labels.get("human_reviewed")
-        if isinstance(reviewed_counts, dict):
-            reviewed = sum(value for value in reviewed_counts.values() if isinstance(value, int))
-    lines.append(f"| labels reviewed by a human | {_number(reviewed)} | n/a | {dataset} |")
+    counts = [_get(results, ("labels", label_type)) for label_type in LABEL_TYPES]
+    total = (
+        sum(cast(int, count) for count in counts)
+        if all(isinstance(count, int) for count in counts)
+        else None
+    )
+    reviewed_counts = _get(results, ("labels", "human_reviewed"))
+    reviewed = (
+        sum(value for value in reviewed_counts.values() if isinstance(value, int))
+        if isinstance(reviewed_counts, dict)
+        else None
+    )
+    for name, count in (
+        ("labels written by an automated pass", _get(results, ("labels", "authors", "agent"))),
+        ("labels written by a human", _get(results, ("labels", "authors", "human"))),
+        ("labels reviewed by a human", reviewed),
+    ):
+        value = "n/a" if count is None or total is None else f"{_number(count)} of {total}"
+        lines.append(f"| {name} | {value} | n/a | {dataset} |")
     return "\n".join(lines) + "\n"
+
+
+def update_readme(readme: Path, table: str) -> None:
+    """Replace the README block between the results markers with the table."""
+    text = readme.read_text(encoding="utf-8")
+    start = text.find(RESULTS_START)
+    end = text.find(RESULTS_END)
+    if start == -1 or end == -1 or end < start:
+        raise ValidationError(f"results markers not found in {readme.as_posix()}")
+    head = text[: start + len(RESULTS_START)]
+    readme.write_text(f"{head}\n\n{table.rstrip()}\n\n{text[end:]}", encoding="utf-8", newline="\n")
+
+
+def _required(results: dict[str, object], path: Sequence[str]) -> object:
+    value = _get(results, path)
+    if value is None:
+        raise ValidationError(f"results are missing {'.'.join(path)}")
+    return value
+
+
+def _percent(results: dict[str, object], path: Sequence[str]) -> int:
+    return round(float(cast(float, _required(results, path))) * 100)
+
+
+def resume_bullets(results: dict[str, object], answerable_questions: int) -> str:
+    """Fill the three resume bullets from measured results."""
+    documents = _required(results, ("corpus", "documents"))
+    pages = _required(results, ("corpus", "pages"))
+    cities = _required(results, ("corpus", "cities"))
+    recall = _percent(results, ("retrieval", "item", "hybrid_rerank", "recall_at_10"))
+    total_labels = sum(
+        cast(int, _required(results, ("labels", label_type))) for label_type in LABEL_TYPES
+    )
+    faithfulness_before = _percent(results, ("answers", "baseline", "faithfulness", "median"))
+    faithfulness_after = _percent(results, ("answers", "final", "faithfulness", "median"))
+    reduction = _percent(results, ("cost", "reduction"))
+    completion = _percent(results, ("agent", "completion", "median"))
+    tasks = _required(results, ("labels", "agent_task"))
+    return (
+        f"- Built a retrieval and extraction system over {documents} city-council documents "
+        f"({pages} pages, {cities} cities) using Python, FastAPI and PostgreSQL/pgvector; "
+        f"hybrid search reached {recall}% recall@10 on a {answerable_questions}-question "
+        "labeled benchmark.\n"
+        f"- Designed an LLM evaluation harness that gates CI on {total_labels} regression cases; "
+        f"raised answer faithfulness from {faithfulness_before}% to {faithfulness_after}% and "
+        f"cut cost per query {reduction}% through response caching.\n"
+        "- Shipped a tool-using research agent with step, cost and permission limits, "
+        f"completing {completion}% of {tasks} multi-step tasks; used by [N] monthly users "
+        "including [organization].\n"
+    )

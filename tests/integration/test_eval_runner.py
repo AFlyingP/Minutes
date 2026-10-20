@@ -188,6 +188,13 @@ def test_render_table_numbers_come_from_results(eval_file: EvalFile) -> None:
 
     for line in table.splitlines()[2:]:
         name, value, runs, _ = [cell.strip() for cell in line.strip("|").split("|")]
+        if name.startswith("labels "):
+            labels_total = sum(
+                cast(int, cast(dict[str, object], eval_file.results["labels"])[label_type])
+                for label_type in ("question", "agenda_count", "extraction", "agent_task")
+            )
+            value, _, total = value.partition(" of ")
+            assert total == str(labels_total), name
         source: object = eval_file.results
         if name == "labels reviewed by a human":
             labels = cast(dict[str, object], eval_file.results["labels"])

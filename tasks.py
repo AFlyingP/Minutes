@@ -344,7 +344,7 @@ def target_eval(flags: set[str]) -> int:
             [*MINUTES, "eval", "run", "--suite", "full", "--controls", "off", "--only", "cost"]
         ),
         lambda: run([*MINUTES, "eval", "run", "--suite", "full"]),
-        lambda: run([*MINUTES, "eval", "report"]),
+        lambda: run([*MINUTES, "eval", "report", "--readme", "README.md"]),
     )
 
 
