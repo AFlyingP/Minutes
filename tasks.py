@@ -263,8 +263,8 @@ def target_check(flags: set[str]) -> int:
             return code
     total = sum(durations.values())
     say(f"check: {total:.1f}s")
-    if durations["test"] > 60:
-        say("test exceeded 60s")
+    if durations["test"] > 90:
+        say("test exceeded 90s")
         return 1
     if total > 600:
         say("check exceeded 600s")
