@@ -35,6 +35,6 @@
 | Qdrant ANN p95 | 33.7882 | n/a | full |
 | answer grader agreement | 1 | n/a | full |
 | support grader agreement | 1 | n/a | full |
-| labels written by an automated pass | 320 | n/a | full |
-| labels written by a human | 0 | n/a | full |
-| labels reviewed by a human | 0 | n/a | full |
+| labels written by an automated pass | 320 of 320 | n/a | full |
+| labels written by a human | 0 of 320 | n/a | full |
+| labels reviewed by a human | 0 of 320 | n/a | full |

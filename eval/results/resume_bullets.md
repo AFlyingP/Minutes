@@ -1,0 +1,3 @@
+- Built a retrieval and extraction system over 854 city-council documents (5966 pages, 2 cities) using Python, FastAPI and PostgreSQL/pgvector; hybrid search reached 85% recall@10 on a 48-question labeled benchmark.
+- Designed an LLM evaluation harness that gates CI on 320 regression cases; raised answer faithfulness from 93% to 98% and cut cost per query 38% through response caching.
+- Shipped a tool-using research agent with step, cost and permission limits, completing 45% of 20 multi-step tasks; used by [N] monthly users including [organization].
