@@ -78,6 +78,26 @@ button {
   gap: 0.5rem;
 }
 
+ol[data-testid="steps"] {
+  list-style: none;
+  padding-left: 0;
+}
+
+ol[data-testid="steps"] pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+form > textarea {
+  display: block;
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 4.5rem;
+  margin-bottom: 0.5rem;
+  font: inherit;
+  padding: 0.35rem 0.5rem;
+}
+
 .search-row input {
   flex: 1;
 }
